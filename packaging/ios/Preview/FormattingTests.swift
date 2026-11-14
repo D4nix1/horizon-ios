@@ -252,6 +252,36 @@ final class PackMutationTests: XCTestCase {
 
 @MainActor
 final class AutomaticGameFilesTests: XCTestCase {
+    func testDownloadErrorFactsKeepCodesButNeverIncludeCredentials() {
+        let underlying = NSError(domain:NSPOSIXErrorDomain,code:61,userInfo:[NSLocalizedDescriptionKey:"private-password"])
+        let error = NSError(domain:NSURLErrorDomain,code:NSURLErrorCannotConnectToHost,userInfo:[
+            NSUnderlyingErrorKey:underlying,
+            NSURLErrorFailingURLErrorKey:URL(string:"https://user:pass@example.invalid/file?access_token=private-value")!,
+            NSLocalizedDescriptionKey:"private-password"
+        ])
+        let facts = GameFilesDownload.errorFacts(error)
+        XCTAssertTrue(facts.contains("kind=connection"))
+        XCTAssertTrue(facts.contains("code=-1004"))
+        XCTAssertTrue(facts.contains("underlying_code=61"))
+        for sensitive in ["private", "example.invalid", "https", "user:pass"] {XCTAssertFalse(facts.contains(sensitive))}
+    }
+
+    func testFailedTransferLogsItsStageAndSafeNativeError() async {
+        let restore = temporarilyRemoveResourceMarker()
+        defer {restore()}
+        var events: [String] = []
+        let model = GameFilesDownload(automaticSource:{["url":"http://127.0.0.1:1/fixture?access_token=never-log-this"]},diagnostic:{events.append($0)})
+        await model.startAutomatic()
+        let deadline = Date().addingTimeInterval(10)
+        while model.busy, Date() < deadline {try? await Task.sleep(nanoseconds:20_000_000)}
+        XCTAssertFalse(model.busy)
+        XCTAssertTrue(events.contains(where:{$0.contains("source_lookup_result has_url=true has_error=false")}))
+        XCTAssertTrue(events.contains(where:{$0.contains("transfer_start endpoint=custom")}))
+        XCTAssertTrue(events.contains(where:{$0.contains("transfer_failed") && $0.contains("domain=NSURLErrorDomain")}))
+        XCTAssertFalse(events.joined().contains("never-log-this"))
+        XCTAssertFalse(events.joined().contains("127.0.0.1"))
+    }
+
     private func temporarilyRemoveResourceMarker() -> () -> Void {
         let marker = GameFolder.resources.appendingPathComponent("horizon-resources.json")
         let previous = try? Data(contentsOf: marker)
@@ -266,10 +296,11 @@ final class AutomaticGameFilesTests: XCTestCase {
         let restore = temporarilyRemoveResourceMarker()
         defer { restore() }
         var calls = 0
+        var events: [String] = []
         let model = GameFilesDownload(automaticSource: {
             calls += 1
             return ["error": "Fixture source is unavailable"]
-        })
+        }, diagnostic: {events.append($0)})
         model.link = "https://example.invalid/private.zip"
         model.token = "private-test-token"
         await model.startAutomatic()
@@ -281,6 +312,9 @@ final class AutomaticGameFilesTests: XCTestCase {
         XCTAssertFalse(model.busy)
         XCTAssertEqual(model.link, "https://example.invalid/private.zip")
         XCTAssertEqual(model.token, "private-test-token")
+        XCTAssertTrue(events.contains(where:{$0.contains("source_lookup_failed")}))
+        XCTAssertFalse(events.contains(where:{$0.contains("transfer_start")}))
+        XCTAssertFalse(events.joined().contains("private-test-token"))
     }
 
     func testCancelWhileResolvingSourceCannotStartLateDownload() async {

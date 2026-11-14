@@ -22,6 +22,45 @@ final class GameFilesDownload: NSObject, ObservableObject {
     typealias ImportArchive = @MainActor (String) async -> [String: Any]
     private let importArchive: ImportArchive
     private let automaticSource: @MainActor () async -> [String: Any]
+    private let diagnostic: @MainActor (String) -> Void
+    private var startedAt = ProcessInfo.processInfo.systemUptime
+    private var lastProgressAt = 0.0
+    private var receivedBytes: Int64 = 0
+    private var expectedBytes: Int64 = 0
+
+    private func trace(_ event: String) {
+        let elapsed = Int(max(0, ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
+        diagnostic("Game files [\(attempt.uuidString.prefix(8))] \(event) elapsed_ms=\(elapsed)")
+    }
+
+    private func traceStorage() {
+        let free = (try? FileManager.default.attributesOfFileSystem(forPath: GameFolder.documents.path)[.systemFreeSize] as? NSNumber)?.int64Value
+        trace("storage free_bytes=\(free ?? -1)")
+    }
+
+    /// Never log NSError.userInfo/descriptions: these can contain URLs and credentials.
+    nonisolated static func errorFacts(_ error: Error) -> String {
+        let e = error as NSError
+        let domain = [NSURLErrorDomain, NSPOSIXErrorDomain, NSCocoaErrorDomain].contains(e.domain) ? e.domain : "other"
+        let kind: String
+        switch (e.domain, e.code) {
+        case (NSURLErrorDomain, NSURLErrorCannotFindHost): kind = "dns"
+        case (NSURLErrorDomain, NSURLErrorCannotConnectToHost): kind = "connection"
+        case (NSURLErrorDomain, NSURLErrorTimedOut): kind = "timeout"
+        case (NSURLErrorDomain, NSURLErrorNotConnectedToInternet): kind = "offline"
+        case (NSURLErrorDomain, NSURLErrorNetworkConnectionLost): kind = "connection_lost"
+        case (NSURLErrorDomain, NSURLErrorCancelled): kind = "cancelled"
+        case (NSURLErrorDomain, -1206 ... -1200): kind = "tls"
+        case (NSCocoaErrorDomain, NSFileWriteOutOfSpaceError): kind = "storage_full"
+        default: kind = "other"
+        }
+        var facts = "kind=\(kind) domain=\(domain) code=\(e.code)"
+        if let underlying = e.userInfo[NSUnderlyingErrorKey] as? NSError {
+            let safe = [NSURLErrorDomain, NSPOSIXErrorDomain, NSCocoaErrorDomain].contains(underlying.domain) ? underlying.domain : "other"
+            facts += " underlying_domain=\(safe) underlying_code=\(underlying.code)"
+        }
+        return facts
+    }
     private var automaticAttempted = false
     // Same packed-ZIP limit as horizon_client::import::MAX_PACKED. Enforce
     // it during transfer, before an oversized archive fills the sandbox.
@@ -32,9 +71,11 @@ final class GameFilesDownload: NSObject, ObservableObject {
     private var session: URLSession?
 
     init(importArchive: @escaping ImportArchive = { await Bridge.send($0) },
-         automaticSource: @escaping @MainActor () async -> [String: Any] = { await Bridge.send("game-files-source") }) {
+         automaticSource: @escaping @MainActor () async -> [String: Any] = { await Bridge.send("game-files-source") },
+         diagnostic: @escaping @MainActor (String) -> Void = { Diagnostics.record($0) }) {
         self.importArchive = importArchive
         self.automaticSource = automaticSource
+        self.diagnostic = diagnostic
         super.init()
     }
     private var background: UIBackgroundTaskIdentifier = .invalid
@@ -62,11 +103,14 @@ final class GameFilesDownload: NSObject, ObservableObject {
     func start() {
         guard !busy else { return }
         attempt = UUID()
+        startedAt = ProcessInfo.processInfo.systemUptime
         resourcesOnly = false
+        trace("custom_start")
         let text = link.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: text), let scheme = url.scheme?.lowercased(),
               scheme == "https" || scheme == "http", url.host != nil
         else {
+            trace("custom_source_rejected invalid_url")
             state = .failed("That is not a web link. It starts with https:// (or http:// on your own network).")
             return
         }
@@ -74,6 +118,7 @@ final class GameFilesDownload: NSObject, ObservableObject {
         do {
             try Keychain.write(token.isEmpty ? nil : token)
         } catch {
+            trace("credential_storage_failed \(Self.errorFacts(error))")
             state = .failed(error.localizedDescription)
             return
         }
@@ -93,16 +138,20 @@ final class GameFilesDownload: NSObject, ObservableObject {
         resourcesOnly = true
         resolvingAutomatic = true
         attempt = UUID()
+        startedAt = ProcessInfo.processInfo.systemUptime
         let generation = attempt
         state = .downloading(received: 0, total: 0)
+        trace("source_lookup_start")
         let answer = await automaticSource()
         guard generation == attempt else { return }
+        trace("source_lookup_result has_url=\(answer["url"] is String) has_error=\(answer.error != nil)")
         resolvingAutomatic = false
-        guard !Task.isCancelled else { state = .idle; return }
+        guard !Task.isCancelled else { trace("source_lookup_cancelled"); state = .idle; return }
         // A cable/manual import can finish while the source request is pending.
-        guard !GameFolder.hasGameFiles else { state = .done("Game files are already installed."); return }
+        guard !GameFolder.hasGameFiles else { trace("already_installed"); state = .done("Game files are already installed."); return }
         guard let text = answer["url"] as? String, let url = URL(string: text),
               ["https", "http"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else {
+            trace("source_lookup_failed detail=\(Diagnostics.redact(answer.error ?? "missing_or_invalid_url"))")
             state = .failed(answer.error ?? "The automatic download is unavailable. Retry or use a download link.")
             return
         }
@@ -115,6 +164,9 @@ final class GameFilesDownload: NSObject, ObservableObject {
         guard !busy else { return }
         resourcesOnly = false
         attempt = UUID()
+        startedAt = ProcessInfo.processInfo.systemUptime
+        trace("file_import_start")
+        traceStorage()
         let generation = attempt
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -137,30 +189,40 @@ final class GameFilesDownload: NSObject, ObservableObject {
             guard generation == attempt, !Task.isCancelled else { return }
             let answer = await importArchive("import-game-files \(local.path)")
             guard generation == attempt else { return }
-            if let error = answer.error { state = .failed(error); Haptics.failed() }
-            else { state = .done(Self.describe(answer)); Haptics.done() }
+            if let error = answer.error { trace("file_import_failed detail=\(Diagnostics.redact(error))"); state = .failed(error); Haptics.failed() }
+            else { trace("file_import_complete files_ready=\(GameFolder.hasGameFiles)"); state = .done(Self.describe(answer)); Haptics.done() }
         } catch {
             guard generation == attempt, !Task.isCancelled else { return }
+            trace("file_import_failed \(Self.errorFacts(error))")
             state = .failed(error.localizedDescription)
             Haptics.failed()
         }
     }
 
     private func begin(url: URL, token: String?) {
+        receivedBytes = 0
+        expectedBytes = 0
+        lastProgressAt = ProcessInfo.processInfo.systemUptime
+        // Only the shipped public endpoint gets a name. Custom paths/queries stay private.
+        let endpoint = url.host?.lowercased() == "cdn.gayfeet.lol" ? "default-cdn" : "custom"
+        trace("transfer_start endpoint=\(endpoint) secure=\(url.scheme?.lowercased() == "https")")
+        traceStorage()
         var request = URLRequest(url: url)
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         // A prepared tree is ~600 MB: ask for the time to finish if the player looks away.
         background = UIApplication.shared.beginBackgroundTask(withName: "Horizon game files") { [weak self] in
             let download = self
-            Task { @MainActor in download?.endBackground() }
+            Task { @MainActor in download?.trace("background_time_expired"); download?.endBackground() }
         }
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+        session.sessionDescription = String(attempt.uuidString.prefix(8))
         self.session = session
         state = .downloading(received: 0, total: 0)
         session.downloadTask(with: request).resume()
     }
 
     func cancel() {
+        if busy { trace("cancel_requested received=\(receivedBytes) expected=\(expectedBytes)") }
         attempt = UUID()
         resolvingAutomatic = false
         session?.invalidateAndCancel()
@@ -186,9 +248,11 @@ final class GameFilesDownload: NSObject, ObservableObject {
         session = nil
         switch outcome {
         case let .failure(error):
+            trace("transfer_failed \(Self.errorFacts(error)) received=\(receivedBytes) expected=\(expectedBytes)")
             state = .failed(error.localizedDescription)
             Haptics.failed()
         case let .success(file):
+            trace("transfer_complete received=\(receivedBytes) expected=\(expectedBytes)")
             defer { try? FileManager.default.removeItem(at: file) }
             // A manual/cable import can also finish after the HTTP transfer began.
             guard !resourcesOnly || !GameFolder.hasGameFiles else {
@@ -196,13 +260,17 @@ final class GameFilesDownload: NSObject, ObservableObject {
                 break
             }
             state = .installing
+            trace("import_start")
+            traceStorage()
             let command = resourcesOnly ? "import-game-files" : "import"
             let answer = await importArchive("\(command) \(file.path)")
             guard generation == attempt else { return }
             if let error = answer.error {
+                trace("import_failed detail=\(Diagnostics.redact(error))")
                 state = .failed(error)
                 Haptics.failed()
             } else {
+                trace("import_complete files_ready=\(GameFolder.hasGameFiles)")
                 state = .done(Self.describe(answer))
                 Haptics.done()
             }
@@ -225,12 +293,32 @@ final class GameFilesDownload: NSObject, ObservableObject {
 }
 
 extension GameFilesDownload: URLSessionDownloadDelegate {
+    nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        let id = session.sessionDescription ?? "unknown"
+        func ms(_ start: Date?, _ end: Date?) -> Int {
+            guard let start, let end else { return -1 }
+            return Int(max(0, end.timeIntervalSince(start)) * 1000)
+        }
+        let last = metrics.transactionMetrics.last
+        let status = (last?.response as? HTTPURLResponse)?.statusCode ?? 0
+        let facts = "Game files [\(id)] network_metrics redirects=\(metrics.redirectCount) transactions=\(metrics.transactionMetrics.count) http_status=\(status) dns_ms=\(ms(last?.domainLookupStartDate,last?.domainLookupEndDate)) connect_ms=\(ms(last?.connectStartDate,last?.connectEndDate)) tls_ms=\(ms(last?.secureConnectionStartDate,last?.secureConnectionEndDate)) response_ms=\(ms(last?.responseStartDate,last?.responseEndDate))"
+        // Metrics may arrive after the terminal callback. Keep their original attempt ID.
+        Task { @MainActor in self.diagnostic(facts) }
+    }
+
     nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData _: Int64,
                                 totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
         let oversized = totalBytesWritten > Self.maximumArchiveBytes || totalBytesExpectedToWrite > Self.maximumArchiveBytes
         if oversized { downloadTask.cancel() }
         Task { @MainActor in
             guard self.session === session else { return }
+            self.receivedBytes = totalBytesWritten
+            self.expectedBytes = max(totalBytesExpectedToWrite, 0)
+            let now = ProcessInfo.processInfo.systemUptime
+            if oversized || now - self.lastProgressAt >= 15 {
+                self.lastProgressAt = now
+                self.trace("transfer_progress received=\(totalBytesWritten) expected=\(max(totalBytesExpectedToWrite, 0)) oversized=\(oversized)")
+            }
             if oversized {
                 self.cancel()
                 self.state = .failed("The archive exceeds the 2 GiB game-file limit.")
@@ -249,7 +337,7 @@ extension GameFilesDownload: URLSessionDownloadDelegate {
             outcome = .failure(DownloadError("The archive exceeds the 2 GiB game-file limit."))
         } else if !(200..<300).contains(status) {
             let reason = status == 401 || status == 403
-                ? "The server refused the download (\(status)): check the access token."
+                ? "The download server refused the request (\(status))."
                 : "The server answered \(status) \(HTTPURLResponse.localizedString(forStatusCode: status))."
             outcome = .failure(DownloadError(reason))
         } else {
@@ -262,7 +350,18 @@ extension GameFilesDownload: URLSessionDownloadDelegate {
                 outcome = .failure(error)
             }
         }
-        Task { @MainActor in await self.finished(outcome, from: session) }
+        let received = downloadTask.countOfBytesReceived
+        let expected = max(downloadTask.countOfBytesExpectedToReceive, 0)
+        Task { @MainActor in
+            guard self.session === session else {
+                if case let .success(file) = outcome { try? FileManager.default.removeItem(at: file) }
+                return
+            }
+            self.receivedBytes = received
+            self.expectedBytes = expected
+            self.trace("http_response status=\(status) received=\(received) expected=\(expected)")
+            await self.finished(outcome, from: session)
+        }
     }
 
     nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
@@ -271,6 +370,8 @@ extension GameFilesDownload: URLSessionDownloadDelegate {
             ? DownloadError("The archive exceeds the 2 GiB game-file limit.") : error
         Task { @MainActor in
             guard self.session === session else { return }
+            self.receivedBytes = task.countOfBytesReceived
+            self.expectedBytes = max(task.countOfBytesExpectedToReceive, 0)
             await self.finished(.failure(failure), from: session)
         }
     }
