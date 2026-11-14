@@ -635,3 +635,43 @@ fn stack_drop_requires_ctrl_even_with_sprint_latched() {
 
 #[path = "play_ping_tests.rs"]
 mod play_ping_tests;
+
+#[path = "dragon_boss_bar_name_tests.rs"]
+mod dragon_boss_bar_name_tests;
+
+#[test]
+fn world_rest_drop_retires_a_blocked_worker_without_waiting() {
+        let (release, wait) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            wait.recv().unwrap();
+            Ok(())
+        });
+        let id = worker.thread().id();
+        drop(WorldRestLoader {
+            progress: Progress::new(),
+            handle: Some(worker),
+        });
+        assert!(
+            retired_rest_loaders()
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|h| h.thread().id() == id)
+        );
+        assert!(!poll_retired_rest_loaders());
+        release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let _ = poll_retired_rest_loaders();
+            if retired_rest_loaders()
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|h| h.thread().id() != id)
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+    }

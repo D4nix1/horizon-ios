@@ -1,6 +1,10 @@
 //! Drawing the mobs, players and projectiles the client sees, each frame (`mob_geometry`).
 use super::*;
 
+#[cfg(test)]
+#[path = "spectator_view_tests.rs"]
+mod spectator_view_tests;
+
 impl Game<'_> {
     pub(in crate::game) fn mob_geometry(
         &self,
@@ -39,6 +43,8 @@ impl Game<'_> {
             Some([rect.u0, rect.v0, rect.u1, rect.v1])
         };
         let scale = self.view_scale();
+        // Who watches (`Entity.isInvisibleTo`): the local player's team.
+        let viewer = self.player_team();
         self.rendered_mobs.set(0);
         let skinning = self.skinning();
         // What custom entity model animations read of the frame.
@@ -105,12 +111,23 @@ impl Game<'_> {
                 }
             }
             let outline = self.mob_outline(mob);
-            // Entity.DATA_SHARED_FLAGS_ID invisible: only the name tag draws (and
-            // the outline of a glowing mob, LivingEntityRenderer.getRenderType).
-            // A player keeps its armour, elytra and held items
-            // (`LivingEntityRenderer.submit` skips only the body).
-            let layers_only = mob.invisible && outline.is_none() && avatar_equipment;
-            if mob.invisible && outline.is_none() && !layers_only {
+            // Entity.DATA_SHARED_FLAGS_ID invisible (the flag the invisibility
+            // effect sets): only the name tag draws (and the outline of a
+            // glowing mob, LivingEntityRenderer.getRenderType). A player keeps
+            // its armour, elytra and held items (`LivingEntityRenderer.submit`
+            // skips only the body).
+            let invisible = mob.is_invisible();
+            // Entity.isInvisibleTo(viewer): a spectator sees it anyway, the
+            // body forced translucent (`LivingEntityRenderer.submit`).
+            let seen_invisible = invisible
+                && !horizon_client::scoreboard::invisible_to(
+                    self.mob_team_of(mob),
+                    viewer,
+                    self.spectator(),
+                    true,
+                );
+            let layers_only = invisible && outline.is_none() && avatar_equipment && !seen_invisible;
+            if invisible && outline.is_none() && !layers_only && !seen_invisible {
                 continue;
             }
             let culling = if PRECHECK
@@ -209,7 +226,7 @@ impl Game<'_> {
                 }
                 if let Some(rgb) = outline {
                     self.mark_outline(&out[entity_start..], rgb);
-                    if mob.invisible {
+                    if invisible && !seen_invisible {
                         let submitted = out.len() > entity_start
                             || self.skin_frame.borrow().mark().0 > skin_jobs;
                         out.truncate(entity_start);
@@ -247,10 +264,11 @@ impl Game<'_> {
             // (a player's, the HDR tiers below, the sulfur cube's shell). A glowing mob's
             // silhouette is posed too (`SkinFrame::outline_since`), unless it is invisible:
             // then only the outline draws.
-            let silhouette_on_gpu = outline.is_none() || !mob.invisible;
+            let silhouette_on_gpu = outline.is_none() || !invisible;
             let posable = skinning
                 && !is_player
                 && !layers_only
+                && !seen_invisible
                 && silhouette_on_gpu
                 && armor.is_empty()
                 && !matches!(
@@ -293,7 +311,18 @@ impl Game<'_> {
                     self.mark_rendered_item(item.start, item.end, &item.item);
                 }
             } else {
-                let items = if avatar_equipment {
+                let items = if avatar_equipment && seen_invisible {
+                    horizon_client::mobs::render::render_avatar_seen_invisible(
+                        mob,
+                        alpha as f32,
+                        camera,
+                        &lookup,
+                        packed,
+                        self.res.mob_data(),
+                        &armor,
+                        out,
+                    )
+                } else if avatar_equipment {
                     horizon_client::mobs::render::render_avatar(
                         mob,
                         alpha as f32,
@@ -309,6 +338,8 @@ impl Game<'_> {
                 } else {
                     let render = if layers_only {
                         horizon_client::mobs::render::render_layers
+                    } else if seen_invisible {
+                        horizon_client::mobs::render::render_seen_invisible
                     } else {
                         horizon_client::mobs::render::render_with
                     };
@@ -345,10 +376,12 @@ impl Game<'_> {
                 // has its own invisibility check. Other previously player-gated
                 // extras keep their existing identity and order in this change.
                 let chest = mob.extra.chest.as_deref();
-                if avatar_equipment && !layers_only {
+                // Invisible bodies never show capes or ears, even to spectators.
+                if avatar_equipment && !invisible {
                     self.player_cape_geometry(mob, chest, camera, alpha as f32, packed, out);
                 }
                 if is_player
+                    && !invisible
                     && let Some((_, name)) = self
                         .remote_player_names()
                         .into_iter()
@@ -410,7 +443,7 @@ impl Game<'_> {
                     let color = horizon_client::mobs::render::abgr(rgb);
                     self.skin_frame.borrow_mut().outline_since(first, color);
                 }
-                if mob.invisible {
+                if invisible && !seen_invisible {
                     let submitted =
                         out.len() > entity_start || self.skin_frame.borrow().mark().0 > skin_jobs;
                     out.truncate(entity_start);

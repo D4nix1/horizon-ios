@@ -15,8 +15,9 @@ permissions:
 # Desktop release and governance automation belongs to the upstream repository.
 jobs:
   label:
-    # Title-only edits change nothing: skip them before a runner starts.
-    if: github.repository == 'horizon-rust/horizon' && (github.event.action != 'edited' || github.event.changes.body != null)
+    # Edits that change neither the description nor the title (the kind and areas they state) change nothing: skip
+    # them before a runner starts.
+    if: github.repository == 'horizon-rust/horizon' && (github.event.action != 'edited' || github.event.changes.body != null || github.event.changes.title != null)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

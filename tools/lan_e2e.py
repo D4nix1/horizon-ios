@@ -661,6 +661,10 @@ def check_menu_transfer(host, guest, out):
     finally:
         host('command', command='gamerule keep_inventory false')
         back_to_game(guest)
+        # A failure after the trip must not leave the guest in the Nether for the checks that follow.
+        if guest('state').get('dimension') != OVERWORLD:
+            guest('command', command=f'execute in {OVERWORLD} run tp @s {home[0]:.2f} {home[1]:.2f} {home[2]:.2f}')
+            wait_dimension(guest, OVERWORLD, 400)
         guest('command', command=f'execute in {OVERWORLD} run setblock {chest[0]} {chest[1]} {chest[2]} minecraft:air')
     return results
 

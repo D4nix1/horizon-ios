@@ -12,6 +12,11 @@ use horizon_core::geometry::trig::Mth;
 use std::borrow::Cow;
 use std::f32::consts::PI;
 
+// The invisible body a viewer still sees (`Entity.isInvisibleTo`), beside this file.
+#[path = "invisible_body.rs"]
+mod invisible_body;
+pub use invisible_body::{render_avatar_seen_invisible, render_seen_invisible};
+
 /// A texture lookup into the shared atlas (name without namespace -> uv rect).
 pub type Atlas<'a> = &'a dyn Fn(&str) -> Option<[f32; 4]>;
 
@@ -1538,6 +1543,7 @@ pub fn render_with(
     out: &mut Vec<Vertex>,
 ) -> Vec<RenderedItem> {
     let mut items = Vec::new();
+    let paint = Some(body_color(m, alpha));
     // The invisibility effect hides the model (a drinking wandering trader);
     // an illusioner shows its four mirror images instead.
     if super::trader::is_invisible(m) {
@@ -1549,7 +1555,7 @@ pub fn render_with(
                     camera - glam::DVec3::new(off[0] + w[0], off[1] + w[1], off[2] + w[2]);
                 let base = base_transform(m, alpha, shifted);
                 render_visible(
-                    m, alpha, base, atlas, light, data, extra, true, out, &mut items, None, true,
+                    m, alpha, base, atlas, light, data, extra, paint, out, &mut items, None, true,
                 );
             }
         }
@@ -1563,7 +1569,7 @@ pub fn render_with(
         light,
         data,
         extra,
-        true,
+        paint,
         out,
         &mut items,
         None,
@@ -1596,7 +1602,7 @@ pub fn render_skinned(
         light,
         data,
         &[],
-        true,
+        Some(body_color(m, alpha)),
         out,
         &mut items,
         Some(skin),
@@ -1632,7 +1638,7 @@ pub fn render_avatar(
         light,
         data,
         extra,
-        body_visible,
+        body_visible.then(|| body_color(m, alpha)),
         out,
         &mut items,
         skin,
@@ -1898,7 +1904,7 @@ pub fn render_layers(
     let mut items = Vec::new();
     let base = base_transform(m, alpha, camera);
     render_visible(
-        m, alpha, base, atlas, light, data, extra, false, out, &mut items, None, true,
+        m, alpha, base, atlas, light, data, extra, None, out, &mut items, None, true,
     );
     items
 }
@@ -1915,6 +1921,7 @@ pub fn render_posed(
 ) -> Vec<RenderedItem> {
     let mut items = Vec::new();
     let base = base_transform_at(m, alpha, origin);
+    let paint = Some(body_color(m, alpha));
     render_visible(
         m,
         alpha,
@@ -1923,7 +1930,7 @@ pub fn render_posed(
         light,
         data,
         &[],
-        true,
+        paint,
         out,
         &mut items,
         None,
@@ -2082,7 +2089,8 @@ fn render_visible(
     light: u32,
     data: &MobData,
     extra: &[(&Part, [f32; 4], u32, u32, String, bool)],
-    body_visible: bool,
+    // `submit`'s tinted body colour, or None for equipment layers only.
+    paint: Option<u32>,
     out: &mut Vec<Vertex>,
     items: &mut Vec<RenderedItem>,
     skin: Option<&mut super::skin::Skin>,
@@ -2218,7 +2226,7 @@ fn render_visible(
                 None
             }
         });
-        if body_visible && let Some(uv) = uv {
+        if let (Some(tint), Some(uv)) = (paint, uv) {
             let start = out.len();
             put(
                 skin,
@@ -2227,7 +2235,7 @@ fn render_visible(
                 &poses,
                 uv,
                 0.0,
-                body_color(m, alpha),
+                tint,
                 light,
                 body_overlay(m, alpha),
                 out,
@@ -2240,13 +2248,14 @@ fn render_visible(
                     &poses,
                     glow,
                     0.0,
-                    body_color(m, alpha),
+                    tint,
                     FULL_BRIGHT,
                     0,
                     out,
                 );
             }
-            if translucent_body(m) {
+            // A body below full alpha (`forceTransparent`'s 654311423) blends too.
+            if translucent_body(m) || tint >> 24 != 0xFF {
                 mark_oit(&mut out[start..]);
             }
         }

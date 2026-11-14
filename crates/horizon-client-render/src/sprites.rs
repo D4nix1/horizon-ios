@@ -529,9 +529,9 @@ impl Sprites {
         let metadata = match horizon_core::prepared_files::read_to_string(
             &path.with_extension("png.mcmeta"),
         ) {
-            Ok(text) => Some(serde_json::from_str::<
+            Ok(text) => Some(crate::packs::first_json::<
                 BTreeMap<String, Box<serde_json::value::RawValue>>,
-            >(&text)?),
+            >(text.as_bytes())?),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error.into()),
         };
@@ -647,9 +647,9 @@ impl Sprites {
         let metadata = match horizon_core::prepared_files::read_to_string(
             &path.with_extension("png.mcmeta"),
         ) {
-            Ok(text) => Some(serde_json::from_str::<
+            Ok(text) => Some(crate::packs::first_json::<
                 BTreeMap<String, Box<serde_json::value::RawValue>>,
-            >(&text)?),
+            >(text.as_bytes())?),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error.into()),
         };
