@@ -729,11 +729,19 @@ impl Game<'_> {
             self.title.is_none(),
             &mut hooked,
         );
-        if hooked >= 1 {
+        let effective = if hooked >= 1 {
             hooked.min(limit)
         } else {
             limit
+        };
+        #[cfg(target_os = "ios")]
+        if let Some(window) = &self.window {
+            use winit::platform::ios::WindowExtIOS;
+            window.set_preferred_frame_rate(
+                (!horizon_ios_launcher::covered()).then_some(effective.max(1) as u32),
+            );
         }
+        effective
     }
     /// `Minecraft.runTick`'s frame limiter: `FramerateLimiter.limitDisplayFPS`
     /// below 260 frames per second, sleeping then spin-waiting until the

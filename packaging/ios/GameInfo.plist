@@ -40,6 +40,9 @@
 	<string>1</string>
 	<!-- Game Mode (iOS 18+): asks the system to favour the game's frame timing and to route pad and mouse input
 	     as a game would receive it. Read by GameController and UIKit, not by the Rust game. -->
+	<!-- Current Game Mode key; retain GC below for iOS 18. -->
+	<key>LSSupportsGameMode</key>
+	<true/>
 	<key>GCSupportsGameMode</key>
 	<true/>
 	<!-- The Azure app the launcher signs Microsoft accounts in with (packaging/ios/Launcher/MicrosoftAccount.swift):

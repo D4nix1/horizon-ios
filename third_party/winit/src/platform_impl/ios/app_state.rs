@@ -467,8 +467,6 @@ pub fn did_finish_launching(mtm: MainThreadMarker) {
     };
 
     this.waker.start();
-    // Horizon: ask for ProMotion refresh rates (see display_link.rs).
-    super::display_link::start(mtm);
 
     // have to drop RefMut because the window setup code below can trigger new events
     drop(this);
@@ -725,6 +723,7 @@ pub fn handle_events_cleared(mtm: MainThreadMarker) {
 
 pub(crate) fn terminated(application: &UIApplication) {
     let mtm = MainThreadMarker::from(application);
+    super::display_link::stop(mtm);
 
     let mut events = Vec::new();
     #[allow(deprecated)]

@@ -30,7 +30,6 @@ pub fn packs_dir() -> PathBuf {
         .unwrap_or_default()
         .join("resourcepacks")
 }
-mod folder;
 pub(super) mod transaction;
 
 /// `Blaze3D.openPath`: the desktop's handler on the folder (the default file manager).

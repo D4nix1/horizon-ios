@@ -25,7 +25,7 @@ def program(source=None):
     source = source or (ROOT / "packaging/ios/Launcher/GameFiles.swift").read_text()
     vault = swift_block(source, source.index("private enum Keychain"))
     start = swift_block(source, source.index("    func start()"))
-    return PREAMBLE + vault + "\nfinal class StartProbe {\n" + START_STUBS + start + "\n}\n" + CASES
+    return PREAMBLE + vault + "\nfinal class StartProbe {\n" + START_STUBS + swift_block(source, source.index("    nonisolated static func errorFacts(")) + "\n" + start + "\n}\n" + CASES
 
 
 PREAMBLE = r'''
@@ -82,6 +82,10 @@ final class UserDefaults {
 }
 '''
 START_STUBS = r'''
+var startedAt = 0.0
+var diagnosticEvents:[String] = []
+func trace(_ event:String) {diagnosticEvents.append(event)}
+
  enum State {case idle,failed(String)}
  var busy=false,resourcesOnly=true
  var attempt=UUID()

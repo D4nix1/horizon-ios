@@ -5,6 +5,11 @@
 #[path = "extras/pvp.rs"]
 pub(in crate::game) mod pvp;
 
+#[path = "extras/mouse_tweaks.rs"]
+pub(in crate::game) mod mouse_tweaks;
+#[path = "extras/sorting.rs"]
+mod sorting;
+
 use super::{Dim, Game, Screen, native_hooks::NativeMinimap};
 use horizon_client::{
     actions::Action,

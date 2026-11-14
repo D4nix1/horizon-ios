@@ -12,6 +12,10 @@
 
 use std::cell::RefCell;
 
+#[path = "display_link_policy.rs"]
+mod policy;
+use policy::Policy;
+
 use core_foundation::runloop::kCFRunLoopCommonModes;
 use objc2::encode::{Encode, Encoding};
 use objc2::rc::Retained;
@@ -29,14 +33,11 @@ struct CAFrameRateRange {
 }
 
 unsafe impl Encode for CAFrameRateRange {
-    const ENCODING: Encoding =
-        Encoding::Struct("CAFrameRateRange", &[f32::ENCODING, f32::ENCODING, f32::ENCODING]);
+    const ENCODING: Encoding = Encoding::Struct(
+        "CAFrameRateRange",
+        &[f32::ENCODING, f32::ENCODING, f32::ENCODING],
+    );
 }
-
-/// The range Apple suggests for games, with the minimum at 80 so the display does not settle
-/// at 60 while the game keeps up; ProMotion picks the highest rate the game sustains.
-const GAME_FRAME_RATE_RANGE: CAFrameRateRange =
-    CAFrameRateRange { minimum: 80.0, maximum: 120.0, preferred: 120.0 };
 
 declare_class!(
     struct HorizonDisplayLinkTarget;
@@ -55,50 +56,93 @@ declare_class!(
     }
 );
 
+#[derive(Default)]
+struct State {
+    policy: Policy,
+    link: Option<Retained<AnyObject>>,
+    applied: Option<u32>,
+}
 thread_local! {
-    /// The run loop retains the link and the link its target; held here as well so the link
-    /// is plainly owned for the life of the app.
-    static LINK: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
+    static STATE: RefCell<State> = RefCell::new(State::default());
 }
 
-/// Adds the display link to the main run loop, once. Devices without ProMotion cap the
-/// range at their own maximum, so this is harmless on 60 Hz screens.
-pub(crate) fn start(mtm: MainThreadMarker) {
-    if LINK.with(|link| link.borrow().is_some()) {
+/// Called only on UIKit's main thread, through WindowExtIOS.
+pub(crate) fn request(mtm: MainThreadMarker, requested: Option<u32>, maximum: u32) {
+    STATE.with(|cell| {
+        let mut state = cell.borrow_mut();
+        state.policy.requested = requested;
+        state.policy.maximum = maximum;
+        apply(mtm, &mut state);
+    });
+}
+
+/// Scene/application activation is independent from whether a game is running.
+pub(crate) fn active(mtm: MainThreadMarker, active: bool) {
+    STATE.with(|cell| {
+        let mut state = cell.borrow_mut();
+        state.policy.active = active;
+        apply(mtm, &mut state);
+    });
+}
+
+pub(crate) fn stop(_mtm: MainThreadMarker) {
+    STATE.with(|cell| {
+        let mut state = cell.borrow_mut();
+        if let Some(link) = state.link.take() {
+            let _: () = unsafe { msg_send![&*link, invalidate] };
+        }
+        *state = State::default();
+    });
+}
+
+fn apply(mtm: MainThreadMarker, state: &mut State) {
+    let rate = state.policy.rate();
+    if rate == state.applied {
         return;
     }
+    let Some(rate) = rate else {
+        if let Some(link) = &state.link {
+            let _: () = unsafe { msg_send![&**link, setPaused: true] };
+        }
+        state.applied = None;
+        return;
+    };
+    if state.link.is_none() {
+        state.link = create(mtm);
+    }
+    let Some(link) = &state.link else { return };
+    let responds: bool =
+        unsafe { msg_send![&**link, respondsToSelector: sel!(setPreferredFrameRateRange:)] };
+    if responds {
+        let range = CAFrameRateRange {
+            minimum: rate.min(80) as f32,
+            maximum: rate as f32,
+            preferred: rate as f32,
+        };
+        let _: () = unsafe { msg_send![&**link, setPreferredFrameRateRange: range] };
+    } else {
+        let _: () = unsafe { msg_send![&**link, setPreferredFramesPerSecond: rate as isize] };
+    }
+    let _: () = unsafe { msg_send![&**link, setPaused: false] };
+    state.applied = Some(rate);
+}
+
+/// Created lazily only after a visible, active game requests callbacks.
+fn create(mtm: MainThreadMarker) -> Option<Retained<AnyObject>> {
     let (Some(display_link_class), Some(run_loop_class)) =
         (AnyClass::get("CADisplayLink"), AnyClass::get("NSRunLoop"))
     else {
-        return;
+        return None;
     };
-
     let target = mtm.alloc::<HorizonDisplayLinkTarget>().set_ivars(());
     let target: Retained<HorizonDisplayLinkTarget> = unsafe { msg_send_id![super(target), init] };
-
     let link: Option<Retained<AnyObject>> = unsafe {
-        msg_send_id![
-            display_link_class,
-            displayLinkWithTarget: &*target,
-            selector: sel!(tick:)
-        ]
+        msg_send_id![display_link_class, displayLinkWithTarget: &*target, selector: sel!(tick:)]
     };
-    let Some(link) = link else {
-        return;
-    };
-
-    let responds: bool =
-        unsafe { msg_send![&*link, respondsToSelector: sel!(setPreferredFrameRateRange:)] };
-    if responds {
-        let _: () = unsafe { msg_send![&*link, setPreferredFrameRateRange: GAME_FRAME_RATE_RANGE] };
-    } else {
-        let _: () = unsafe { msg_send![&*link, setPreferredFramesPerSecond: 120isize] };
-    }
-
+    let link = link?;
+    let _: () = unsafe { msg_send![&*link, setPaused: true] };
     let run_loop: Retained<AnyObject> = unsafe { msg_send_id![run_loop_class, mainRunLoop] };
-    // `kCFRunLoopCommonModes` is toll-free bridged to `NSRunLoopCommonModes`.
     let common_modes = unsafe { kCFRunLoopCommonModes } as *const AnyObject;
     let _: () = unsafe { msg_send![&*link, addToRunLoop: &*run_loop, forMode: common_modes] };
-
-    LINK.with(|cell| *cell.borrow_mut() = Some(link));
+    Some(link)
 }

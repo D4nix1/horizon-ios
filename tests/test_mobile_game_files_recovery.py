@@ -38,7 +38,12 @@ final class Gate {
 }
 extension Dictionary where Key == String, Value == Any {var error:String? {self["error"] as? String}}
 enum Haptics {static func failed(){};static func done(){}}
+enum Diagnostics {static func redact(_ text:String)->String{text}}
 @MainActor final class Importer {
+ var startedAt = 0.0;var diagnosticEvents:[String]=[]
+ func trace(_ text:String){diagnosticEvents.append(text)}
+ func traceStorage(){}
+ static func errorFacts(_ error:Error)->String{String((error as NSError).code)}
  nonisolated static let maximumArchiveBytes:Int64=1024
  enum State:Equatable {case idle,installing,done(String),failed(String)}
  var busy=false;var resourcesOnly=false;var attempt=UUID();var state=State.idle;var calls=[String]();var reject=false

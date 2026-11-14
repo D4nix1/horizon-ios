@@ -8,8 +8,8 @@ Archive SHA-256 (also the original Cargo.lock checksum):
 Upstream revision: `e9809ef54b18499bb4f2cac945719ecc2a61061b`.
 The upstream Apache-2.0 license and copyright notices are retained in LICENSE.
 
-The patch is confined to Cargo.toml (UIKit binding features), src/lib.rs (host mapping tests),
-and src/platform_impl/ios/{mod,app_state,display_link,view,view_controller,window,event_loop,scene,hardware_keyboard,hardware_mouse}.rs.
+The patch is confined to Cargo.toml (UIKit binding features), src/lib.rs (host mapping and refresh-policy tests), src/platform/ios.rs (refresh hints),
+and src/platform_impl/ios/{mod,app_state,display_link,display_link_policy,view,view_controller,window,event_loop,scene,hardware_keyboard,hardware_mouse}.rs.
 `src/event.rs` also provides the iOS-only virtual-key constructor described below. All other files are the unmodified published crate. Root Cargo.toml patches crates.io so local
 and CI builds use the same input backend; Cargo.lock removes only winit's registry source/checksum.
 
@@ -61,10 +61,14 @@ view-local coordinates, matching hover events, including across orientation chan
 
 ## ProMotion refresh rate
 
-`CADisableMinimumFrameDurationOnPhone` in the game plist only permits rates above 60 Hz on
-ProMotion iPhones; the display runs at the rate the app's display links ask for, and winit's
-redraws come from run-loop observers, not a display link. `display_link.rs` adds one
-`CADisplayLink` to the main run loop at launch (`app_state::did_finish_launching`) with
-`preferredFrameRateRange` 80–120, preferred 120, as Apple suggests for games. Its callback does
-nothing: the game's loop and frame limiter still decide when to draw. 60 Hz screens cap the range
-at their own maximum.
+`CADisableMinimumFrameDurationOnPhone` permits high refresh rates. The new
+`WindowExtIOS::set_preferred_frame_rate` supplies a bounded display-link hint;
+`None`/zero pauses it. The link is allocated only for an active game request,
+not at app launch. UIKit scene/application inactivity pauses it independently,
+and termination invalidates it. A resumed scene cannot restart a stopped game.
+
+The launcher pauses it while covering the engine. The game's effective frame
+limit updates it, including title-menu, idle, Battery Mode and native lower-limit
+policies. The requested range is capped by the window's actual screen maximum.
+The callback does no work; the existing game loop still decides when to draw.
+Pure host tests cover start/cover/background/resume and hardware/frame-limit caps.

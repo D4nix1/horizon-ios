@@ -97,6 +97,10 @@ impl<T: 'static> EventLoopExtIOS for EventLoop<T> {
 
 /// Additional methods on [`Window`] that are specific to iOS.
 pub trait WindowExtIOS {
+    /// Horizon: requests a display refresh hint, capped by this window's screen.
+    /// `None` or zero pauses the hint's display link. The scene must also be active.
+    fn set_preferred_frame_rate(&self, frames_per_second: Option<u32>);
+
     /// Sets the [`contentScaleFactor`] of the underlying [`UIWindow`] to `scale_factor`.
     ///
     /// The default value is device dependent, and it's recommended GLES or Metal applications set
@@ -195,6 +199,10 @@ pub trait WindowExtIOS {
 }
 
 impl WindowExtIOS for Window {
+    fn set_preferred_frame_rate(&self, frames_per_second: Option<u32>) {
+        self.window.maybe_queue_on_main(move |w| w.set_preferred_frame_rate(frames_per_second));
+    }
+
     #[inline]
     fn set_scale_factor(&self, scale_factor: f64) {
         self.window.maybe_queue_on_main(move |w| w.set_scale_factor(scale_factor))
