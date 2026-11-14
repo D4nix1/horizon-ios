@@ -57,7 +57,7 @@ fn vanilla_particle_description_resolves_foreign_and_default_namespace_sprites()
         );
         engine.particles.push(particle);
         let mut vertices = Vec::new();
-        engine.render(DVec3::ZERO, 0.0, 0.0, 0.5, &|_| 0xf0, &mut vertices);
+        engine.render(DVec3::ZERO, Quat::IDENTITY, 0.5, &|_| 0xf0, &mut vertices);
         assert_eq!(vertices.len(), 4, "particle with {reference} must render");
         assert!(vertices.iter().all(|vertex| {
             (0.25..=0.75).contains(&vertex.uv[0]) && (0.5..=0.875).contains(&vertex.uv[1])
@@ -103,7 +103,7 @@ fn nested_native_particle_id_keeps_sprite_frames_and_declared_behaviour() {
     assert_eq!(engine.snapshot(&particle).quad.unwrap().sprite, "spark");
     engine.particles.push(particle);
     let mut vertices = Vec::new();
-    engine.render(DVec3::ZERO, 0.0, 0.0, 0.5, &|_| 0xf0, &mut vertices);
+    engine.render(DVec3::ZERO, Quat::IDENTITY, 0.5, &|_| 0xf0, &mut vertices);
     assert_eq!(vertices.len(), 4);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -165,7 +165,7 @@ fn resource_reload_clears_old_live_pending_emitters_and_firework_groups() {
     assert!(engine.emitters.is_empty());
     assert!(engine.starters.is_empty());
     let mut vertices = Vec::new();
-    engine.render(DVec3::ZERO, 0.0, 0.0, 0.5, &|_| 0xf0, &mut vertices);
+    engine.render(DVec3::ZERO, Quat::IDENTITY, 0.5, &|_| 0xf0, &mut vertices);
     assert!(vertices.is_empty());
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -228,7 +228,7 @@ fn prepared_particle_reload_needs_no_files_and_discards_old_controlled_handles()
         .unwrap();
     engine.particles.push(fresh);
     let mut vertices = Vec::new();
-    engine.render(DVec3::ZERO, 0.0, 0.0, 0.5, &|_| 0xf0, &mut vertices);
+    engine.render(DVec3::ZERO, Quat::IDENTITY, 0.5, &|_| 0xf0, &mut vertices);
     assert_eq!(vertices.len(), 4);
     assert!(
         vertices

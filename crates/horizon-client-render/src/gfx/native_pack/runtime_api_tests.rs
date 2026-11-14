@@ -36,6 +36,7 @@ fn checked_new_api_reports_are_refused_and_the_legacy_pack_keeps_rendering() {
         flat: None,
         sprites: [1.0; 2],
         format: wgpu::TextureFormat::Rgba8Unorm,
+        linear: false,
         sprite_tags: &[],
         sprite_materials: &[],
         entities: &empty,

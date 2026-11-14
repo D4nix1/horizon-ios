@@ -28,7 +28,11 @@ final class LauncherLayoutTests: XCTestCase {
         for _ in 0..<5 {if export.isHittable {break};app.swipeUp()}
         export.tap()
         XCTAssertTrue(app.otherElements["diagnostic-file-export"].waitForExistence(timeout:15), app.debugDescription)
-        app.buttons["Cancel"].firstMatch.tap()
+        let cancel = app.buttons["Cancel"].firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout:20), app.debugDescription)
+        cancel.tap()
+        expectation(for:NSPredicate(format:"exists == false"), evaluatedWith:app.otherElements["diagnostic-file-export"])
+        waitForExpectations(timeout:5)
         XCTAssertTrue(export.waitForExistence(timeout:5))
     }
     func testNativeTapHoldAndHotbarRecognizersReachTheCBridge() {

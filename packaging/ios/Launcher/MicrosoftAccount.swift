@@ -185,7 +185,10 @@ final class MicrosoftAccount: ObservableObject {
         signing = Task {
             defer { if generation == attempt { signing = nil } }
             do {
+                try Task.checkCancellation()
                 let tokens = try await deviceCode(client)
+                try Task.checkCancellation()
+                guard generation == attempt, selection == epoch else { throw CancellationError() }
                 state = .working("Signing in to Minecraft…")
                 let (added, secrets) = try await exchange(microsoft: tokens)
                 try Task.checkCancellation()
@@ -211,9 +214,11 @@ final class MicrosoftAccount: ObservableObject {
     }
     /// Steps 1 and 2: a code for the player to enter, then the wait for them to do it.
     private func deviceCode(_ client: String) async throws -> (access: String, refresh: String) {
+        try Task.checkCancellation()
         state = .working("Asking Microsoft for a code…")
         let start = try await net.form("https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode",
                                        ["client_id": client, "scope": "XboxLive.signin offline_access"])
+        try Task.checkCancellation()
         guard let device = start["device_code"] as? String, let code = start["user_code"] as? String,
               let link = (start["verification_uri"] as? String).flatMap(URL.init(string:)),
               link.scheme == "https"
@@ -223,6 +228,7 @@ final class MicrosoftAccount: ObservableObject {
         let deadline = now().addingTimeInterval(TimeInterval(start["expires_in"] as? Int ?? 900))
         while now() < deadline {
             try await sleep(interval * 1_000_000_000)
+            try Task.checkCancellation()
             let answer = try await net.form(
                 "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
                 ["grant_type": "urn:ietf:params:oauth:grant-type:device_code", "client_id": client,

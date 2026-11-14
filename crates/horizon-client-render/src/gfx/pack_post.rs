@@ -6194,6 +6194,7 @@ mod tests {
             lines: Some(super::super::pack_lines::inputs()),
             terrain_geometry: None,
             terrain_parts: None,
+            terrain_one_pass: None,
             terrain: Some(atlas.terrain_inputs(false)),
             sky: Some(super::super::pack_sky::inputs()),
             celestial: Some(super::super::pack_sky::celestial_inputs()),
