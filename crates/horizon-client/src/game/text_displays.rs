@@ -420,8 +420,6 @@ impl Game<'_> {
             self.text_display_vertices += batch.vertices.len() / 6 * 4;
         }
         self.text_displays = displays;
-        // LyricsPlus (modded-pc): its lyrics in the world, in the text displays' pass.
-        super::lyricsplus::world(self, camera, normal);
     }
 }
 

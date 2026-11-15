@@ -2342,8 +2342,11 @@ impl Game<'_> {
     /// `native_fill` and `native_text`. Skip a corner `native_corner_shown`
     /// says is taken.
     pub(super) fn native_hud(&mut self, batch: &mut HudBatch, corners: &mut Corners) {
-        // LyricsPlus (modded-pc), as its mixin bundle hooks this HEAD.
-        super::lyricsplus::hud(self, batch, corners);
+        // LyricsPlus (modded-pc): its own HUD only for the menu's layout editor; the lyrics,
+        // card and pill are ours (game/extras/sky_lyrics.rs).
+        if self.native_mod_screen() == Some("lyricsplus") {
+            super::lyricsplus::hud(self, batch, corners);
+        }
         mod_api::dispatch_hud(self, mod_api::mods(), batch, corners);
     }
     /// After the complete normal GUI batch, including screens, prompts, toasts,
