@@ -6,6 +6,8 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
+static NEXT: AtomicU64 = AtomicU64::new(1);
+
 pub struct Picture {
     pub(super) id: u64,
     pub(super) width: u32,
@@ -50,7 +52,6 @@ impl Cache {
                 Some((image, flags))
             })
             .map(|((width, height, pixels), flags)| {
-                static NEXT: AtomicU64 = AtomicU64::new(1);
                 Arc::new(Picture {
                     id: NEXT.fetch_add(1, Ordering::Relaxed),
                     width,
@@ -65,7 +66,45 @@ impl Cache {
     }
 }
 
+impl Picture {
+    /// A picture from decoded RGBA pixels, such as a downloaded image.
+    pub fn from_rgba(width: u32, height: u32, pixels: Vec<u8>) -> Arc<Picture> {
+        Arc::new(Picture {
+            id: NEXT.fetch_add(1, Ordering::Relaxed),
+            width,
+            height,
+            pixels,
+            flags: TextureFlags::default(),
+        })
+    }
+}
+
 impl HudBatch {
+    /// Draw a picture the caller holds (`Picture::from_rgba`).
+    pub fn picture_owned(
+        &mut self,
+        picture: &Arc<Picture>,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        tint: u32,
+    ) {
+        let start = self.vertices.len();
+        let r = Rect {
+            u0: 0.0,
+            v0: 0.0,
+            u1: 1.0,
+            v1: 1.0,
+            w: picture.width,
+            h: picture.height,
+        };
+        self.rect_uv(x, y, w, h, r, tint);
+        self.blend_since(start, Blend::Picture(picture.id));
+        if !self.pictures.iter().any(|p| p.id == picture.id) {
+            self.pictures.push(picture.clone());
+        }
+    }
     /// Draw a full GUI picture at its exact place in the HUD's ordered runs.
     pub fn picture(
         &mut self,

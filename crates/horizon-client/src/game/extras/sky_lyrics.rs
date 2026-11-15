@@ -7,7 +7,8 @@
 //! (words spread over the line), `[offset:+/-ms]`, `[font:minecraft:alt]` (any pack font),
 //! `[color:#RRGGBB]` (the sung colour).
 use super::super::Game;
-use horizon_client::hud::{HudBatch, rgba};
+use horizon_client::hud::{HudAtlas, HudBatch, pictures::Picture, rgba};
+use horizon_client::hud_kit::fit::ellipsize;
 use horizon_client::text::{Style, Text};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -111,11 +112,11 @@ pub(in crate::game) struct SkyLyrics {
     started: Option<Instant>,
     modified: Option<SystemTime>,
     checked: Option<Instant>,
-    /// The sky direction the lyrics hang at: yaw when the song started.
-    anchor_yaw: f32,
     /// What the system's media player plays (`playerctl`), read on a thread of its own.
     playing: Option<Arc<Mutex<NowPlaying>>>,
     track: String,
+    floating: Vec<Floating>,
+    spawned_until: f64,
 }
 
 /// The playing track, its lyrics and its position when last read.
@@ -126,16 +127,29 @@ struct NowPlaying {
     position: f64,
     read: Option<Instant>,
     running: bool,
+    title: String,
+    artist: String,
+    length: f64,
+    cover: Option<Arc<Picture>>,
+}
+
+struct Track {
+    artist: String,
+    title: String,
+    position: f64,
+    running: bool,
+    length: f64,
+    art: String,
 }
 
 /// `playerctl` speaks MPRIS: Spotify, browsers, VLC, mpv... on Linux.
 // shortcut: Linux only (MPRIS); Windows needs GlobalSystemMediaTransportControls, add it when someone plays there.
-fn now_playing() -> Option<(String, String, f64, bool)> {
+fn now_playing() -> Option<Track> {
     let out = std::process::Command::new("playerctl")
         .args([
             "metadata",
             "--format",
-            "{{artist}}\t{{title}}\t{{position}}\t{{status}}",
+            "{{artist}}\t{{title}}\t{{position}}\t{{status}}\t{{mpris:length}}\t{{mpris:artUrl}}",
         ])
         .output()
         .ok()?;
@@ -143,7 +157,17 @@ fn now_playing() -> Option<(String, String, f64, bool)> {
     let mut f = text.trim_end().split('\t');
     let (artist, title) = (f.next()?.to_string(), f.next()?.to_string());
     let position = f.next()?.parse::<f64>().ok()? / 1e6;
-    (!title.is_empty()).then_some((artist, title, position, f.next() == Some("Playing")))
+    let running = f.next() == Some("Playing");
+    let length = f.next().and_then(|l| l.parse::<f64>().ok()).unwrap_or(0.0) / 1e6;
+    let art = f.next().unwrap_or_default().to_string();
+    (!title.is_empty()).then_some(Track {
+        artist,
+        title,
+        position,
+        running,
+        length,
+        art,
+    })
 }
 
 /// Timed lyrics from LRCLIB (free, no key). Word-stamped (`<mm:ss>`) lyrics are word-synced;
@@ -168,26 +192,52 @@ fn fetch_lyrics(artist: &str, title: &str) -> Option<Song> {
     Some(parse(synced))
 }
 
+/// The album cover: Spotify gives an https URL, local players a file:// one.
+fn fetch_cover(url: &str) -> Option<Arc<Picture>> {
+    let bytes = if let Some(path) = url.strip_prefix("file://") {
+        std::fs::read(path).ok()?
+    } else if url.starts_with("http") {
+        let mut body = Vec::new();
+        std::io::Read::read_to_end(
+            &mut std::io::Read::take(ureq::get(url).call().ok()?.into_reader(), 8 << 20),
+            &mut body,
+        )
+        .ok()?;
+        body
+    } else {
+        return None;
+    };
+    let (w, h, pixels) = horizon_client::hud::decode_image_bytes(&bytes).ok()?;
+    Some(Picture::from_rgba(w, h, pixels))
+}
+
 fn watch(shared: Arc<Mutex<NowPlaying>>) {
     loop {
         let read = now_playing();
         let key = read
             .as_ref()
-            .map(|(a, t, ..)| format!("{a}\t{t}"))
+            .map(|t| format!("{}\t{}", t.artist, t.title))
             .unwrap_or_default();
         let changed = shared.lock().is_ok_and(|n| n.key != key);
-        let song = if changed && let Some((artist, title, ..)) = &read {
-            fetch_lyrics(artist, title).map(Arc::new)
-        } else {
-            None
+        let (song, cover) = match &read {
+            Some(t) if changed => (
+                fetch_lyrics(&t.artist, &t.title).map(Arc::new),
+                fetch_cover(&t.art),
+            ),
+            _ => (None, None),
         };
         if let Ok(mut n) = shared.lock() {
             if changed {
                 n.key = key;
                 n.song = song;
+                n.cover = cover;
             }
-            if let Some((_, _, position, running)) = read {
-                (n.position, n.running, n.read) = (position, running, Some(Instant::now()));
+            match read {
+                Some(t) => {
+                    (n.position, n.running, n.read) = (t.position, t.running, Some(Instant::now()));
+                    (n.title, n.artist, n.length) = (t.title, t.artist, t.length);
+                }
+                None => n.read = None,
             }
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
@@ -198,7 +248,6 @@ fn path() -> PathBuf {
     std::env::var_os("HORIZON_SKY_LYRICS").map_or_else(|| "sky-lyrics.lrc".into(), PathBuf::from)
 }
 
-const ELEVATION: f64 = 30.0;
 const SCALE: f32 = 2.5;
 
 impl Game<'_> {
@@ -217,7 +266,7 @@ impl Game<'_> {
                     .ok()
                     .map(|t| Arc::new(parse(&t)));
                 s.started = Some(now);
-                s.anchor_yaw = self.yaw;
+                s.floating.clear();
             }
         }
         // A file wins; otherwise what the media player plays.
@@ -233,36 +282,69 @@ impl Game<'_> {
                 shared
             });
             let Ok(n) = shared.lock() else { return };
-            let (Some(song), Some(read)) = (n.song.clone(), n.read) else {
-                return;
-            };
+            let Some(read) = n.read else { return };
             if n.key != s.track {
                 s.track = n.key.clone();
-                s.anchor_yaw = self.yaw;
+                s.floating.clear();
             }
             let since = if n.running {
                 now.duration_since(read).as_secs_f64()
             } else {
                 0.0
             };
-            (song, n.position + since)
+            let t = n.position + since;
+            if !self.debug {
+                draw_card(batch, &self.gui.atlas, &n, t);
+            }
+            let Some(song) = n.song.clone() else { return };
+            (song, t)
         };
-        let Some((_, yaw, pitch, fov)) = self.locator_camera else {
+        let Some((camera, yaw, pitch, fov)) = self.locator_camera else {
             return;
         };
-        let Some(i) = song.lines.iter().rposition(|l| l.at <= t) else {
-            return;
-        };
-        let line = &song.lines[i];
-        let last = line.words.last().map_or(line.at, |w| w.at);
-        let until = song.lines.get(i + 1).map_or(last + 3.0, |n| n.at);
-        let (fade_in, fade_out) = (t - line.at, until - t);
-        if fade_out <= 0.0 {
-            return;
+        let (eye_yaw, eye_pitch) = (self.yaw, self.pitch);
+        // Spawn each word as it is sung, where the crosshair points; a seek starts over.
+        if t < s.spawned_until - 0.5 || t > s.spawned_until + 2.0 {
+            s.spawned_until = t;
+            s.floating.clear();
         }
-        let alpha = (fade_in.min(fade_out) / 0.3).clamp(0.0, 1.0) as f32;
+        let sung = song.sung.unwrap_or(0xFFD54F);
+        for word in song.lines.iter().flat_map(|l| &l.words) {
+            if word.at > s.spawned_until && word.at <= t {
+                let (sy, cy) = f64::from(eye_yaw.to_radians()).sin_cos();
+                let (sp, cp) = f64::from(eye_pitch.to_radians()).sin_cos();
+                // A little scatter so a fast line doesn't stack in one spot.
+                let k = s.floating.len() as f64;
+                let jitter = [(k * 2.39).sin() * 0.6, (k * 1.71).cos() * 0.4];
+                let at = [
+                    camera[0] - sy * cp * DISTANCE - cy * jitter[0],
+                    camera[1] - sp * DISTANCE + jitter[1],
+                    camera[2] + cy * cp * DISTANCE - sy * jitter[0],
+                ];
+                s.floating.push(Floating {
+                    text: word.text.clone(),
+                    at,
+                    born: word.at,
+                    color: sung,
+                });
+            }
+        }
+        s.spawned_until = s.spawned_until.max(t);
+        s.floating.retain(|f| t - f.born < LIFE);
 
-        // Project the anchor's sky direction into GUI space, like the locator bar's camera.
+        let atlas = &self.gui.atlas;
+        if let Some(i) = song.lines.iter().rposition(|l| l.at <= t) {
+            let line = &song.lines[i];
+            let last = line.words.last().map_or(line.at, |w| w.at);
+            let until = song.lines.get(i + 1).map_or(last + 3.0, |n| n.at);
+            let (fade_in, fade_out) = (t - line.at, until - t);
+            if fade_out > 0.0 {
+                let alpha = (fade_in.min(fade_out) / 0.3).clamp(0.0, 1.0) as f32;
+                draw_pill(batch, atlas, line, t, alpha);
+            }
+        }
+
+        // The camera's basis, as the locator bar builds it.
         let (sy, cy) = f64::from(yaw.to_radians()).sin_cos();
         let (sp, cp) = f64::from(pitch.to_radians()).sin_cos();
         let (f, r, u) = (
@@ -270,58 +352,215 @@ impl Game<'_> {
             [-cy, 0.0, -sy],
             [-sy * sp, cp, cy * sp],
         );
-        let (sa, ca) = f64::from(s.anchor_yaw.to_radians()).sin_cos();
-        let (se, ce) = ELEVATION.to_radians().sin_cos();
-        let d = [-sa * ce, se, ca * ce];
-        let dot = |a: [f64; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
-        let z = dot(f);
-        if z < 0.1 {
-            return;
-        }
         let tan = (f64::from(fov).to_radians() * 0.5).tan();
         let (w, h) = (f64::from(batch.width), f64::from(batch.height));
-        let cx = (w * 0.5 * (1.0 + dot(r) / z / (tan * w / h))) as f32;
-        // A slow float, so the words drift like they hang in the air.
-        let bob = (t * 1.3).sin() as f32 * 3.0;
-        let cy_ = (h * 0.5 * (1.0 - dot(u) / z / tan)) as f32 + bob;
-
-        let atlas = &self.gui.atlas;
         let style = Style {
             font: song.font.clone(),
             ..Style::default()
         };
-        let space = HudBatch::text_width(atlas, " ");
-        let widths: Vec<f32> = line
-            .words
+        // Far words first, so near ones draw over them.
+        let mut order: Vec<(f64, &Floating)> = s
+            .floating
             .iter()
-            .map(|w| batch_width(batch, atlas, &w.text, &style))
+            .map(|fl| {
+                let age = t - fl.born;
+                // Drift upward as the word lives.
+                let d = [
+                    fl.at[0] - camera[0],
+                    fl.at[1] - camera[1] + age * 0.25,
+                    fl.at[2] - camera[2],
+                ];
+                (d[0] * f[0] + d[1] * f[1] + d[2] * f[2], fl)
+            })
             .collect();
-        let total = widths.iter().sum::<f32>() + space * (widths.len() as f32 - 1.0);
-        let mut x = cx - total * SCALE * 0.5;
-        let sung = song.sung.unwrap_or(0xFFD54F);
-        let (sr, sg, sb) = ((sung >> 16) as u8, (sung >> 8) as u8, sung as u8);
-        for (word, ww) in line.words.iter().zip(&widths) {
-            let since = t - word.at;
-            let (color, pop, lift) = if since < 0.0 {
-                (rgba(255, 255, 255, (150.0 * alpha) as u8), 1.0, 0.0)
-            } else {
-                // Pop and rise as the word is sung, then settle.
-                let k = (since / 0.18).min(1.0) as f32;
-                let ease = 1.0 - (1.0 - k) * (1.0 - k);
-                (
-                    rgba(sr, sg, sb, (255.0 * alpha) as u8),
-                    1.0 + 0.35 * (1.0 - ease),
-                    -4.0 * (1.0 - ease),
-                )
-            };
+        order.sort_by(|a, b| b.0.total_cmp(&a.0));
+        for (z, fl) in order {
+            if z < 0.3 {
+                continue;
+            }
+            let age = t - fl.born;
+            let d = [
+                fl.at[0] - camera[0],
+                fl.at[1] - camera[1] + age * 0.25,
+                fl.at[2] - camera[2],
+            ];
+            let dot = |a: [f64; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
+            let sx = (w * 0.5 * (1.0 + dot(r) / z / (tan * w / h))) as f32;
+            let sy_ = (h * 0.5 * (1.0 - dot(u) / z / tan)) as f32;
+            // Size follows distance, like text standing in the world.
+            let size = (SCALE as f64 * DISTANCE / z / (tan / 0.6)) as f32;
+            // Elastic pop in, fade out at the end of its life.
+            let k = (age / 0.35).min(1.0) as f32;
+            let pop = elastic(k);
+            let alpha = (((LIFE - age) / 0.8).min(1.0) as f32).max(0.0) * k.min(1.0).sqrt();
+            let scale = size * pop.max(0.05);
+            let ww = batch_width(batch, atlas, &fl.text, &style);
+            let (x, y) = (sx - ww * 0.5, sy_ - 4.0);
+            let text = Text::styled(fl.text.clone(), style.clone());
+            let (cr, cg, cb) = (
+                (fl.color >> 16) as u8,
+                (fl.color >> 8) as u8,
+                fl.color as u8,
+            );
             let start = batch.vertices.len();
-            let text = Text::styled(word.text.clone(), style.clone());
-            batch.text_styled(atlas, &text, x, cy_ - 4.0 + lift, color, true);
-            batch.scale_since(start, x, cy_, SCALE, SCALE);
-            batch.scale_since(start, x + ww * SCALE * 0.5, cy_, pop, pop);
-            x += (ww + space) * SCALE;
+            // Glow: soft rings of the word in its colour behind a white-hot core.
+            let pulse = 0.6 + 0.4 * ((age * 6.0).sin() as f32 * 0.5 + 0.5);
+            for (ring, a) in [(2.0f32, 40.0f32), (1.2, 70.0), (0.6, 110.0)] {
+                for n in 0..8 {
+                    let ang = n as f32 * std::f32::consts::FRAC_PI_4;
+                    let glow = rgba(cr, cg, cb, (a * alpha * pulse) as u8);
+                    batch.text_styled(
+                        atlas,
+                        &text,
+                        x + ring * ang.cos(),
+                        y + ring * ang.sin(),
+                        glow,
+                        false,
+                    );
+                }
+            }
+            // Fresh words flash white, then settle into their colour.
+            let heat = (1.0 - (age / 0.5) as f32).clamp(0.0, 1.0);
+            let mix = |c: u8| (f32::from(c) + (255.0 - f32::from(c)) * (0.55 + 0.45 * heat)) as u8;
+            batch.text_styled(
+                atlas,
+                &text,
+                x,
+                y,
+                rgba(mix(cr), mix(cg), mix(cb), (255.0 * alpha) as u8),
+                false,
+            );
+            batch.scale_since(start, sx, sy_, scale, scale);
         }
     }
+}
+
+/// Words live this long in the world, in seconds.
+const LIFE: f64 = 4.0;
+/// How far ahead of the eyes a word appears, in blocks.
+const DISTANCE: f64 = 6.0;
+
+/// A sung word standing in the world.
+pub(in crate::game) struct Floating {
+    text: String,
+    at: [f64; 3],
+    born: f64,
+    color: u32,
+}
+
+/// Overshoot then settle: 0 → ~1.25 → 1.
+fn elastic(k: f32) -> f32 {
+    if k >= 1.0 {
+        return 1.0;
+    }
+    1.0 + 2f32.powf(-10.0 * k) * ((k - 0.075) * std::f32::consts::TAU / 0.3).sin()
+}
+
+const PANEL: u32 = rgba(16, 16, 22, 200);
+const DIM: u32 = rgba(170, 170, 185, 255);
+const ACCENT: u32 = rgba(255, 213, 79, 255);
+
+/// A filled rectangle with round corners, as one fan from its centre.
+fn rounded(batch: &mut HudBatch, atlas: &HudAtlas, [x, y, w, h]: [f32; 4], r: f32, color: u32) {
+    let r = r.min(w * 0.5).min(h * 0.5);
+    let corners = [
+        (x + w - r, y + r, -90.0f32),
+        (x + w - r, y + h - r, 0.0),
+        (x + r, y + h - r, 90.0),
+        (x + r, y + r, 180.0),
+    ];
+    let mut rim = Vec::with_capacity(36);
+    for (cx, cy, from) in corners {
+        for k in 0..=8 {
+            let a = (from + 90.0 * k as f32 / 8.0).to_radians();
+            rim.push([cx + r * a.cos(), cy + r * a.sin()]);
+        }
+    }
+    rim.push(rim[0]);
+    batch.fill_fan(atlas, [x + w * 0.5, y + h * 0.5], &rim, color);
+}
+
+/// Top left: the cover, title, artist and a progress bar.
+fn draw_card(batch: &mut HudBatch, atlas: &HudAtlas, n: &NowPlaying, t: f64) {
+    let (x, y, cover) = (6.0, 6.0, 36.0);
+    let text_x = x + 6.0 + cover + 7.0;
+    let title = ellipsize(atlas, &n.title, 130.0);
+    let artist = ellipsize(atlas, &n.artist, 130.0);
+    let text_w = HudBatch::text_width(atlas, &title)
+        .max(HudBatch::text_width(atlas, &artist))
+        .max(90.0);
+    let (w, h) = (text_x - x + text_w + 8.0, cover + 12.0);
+    rounded(batch, atlas, [x, y, w, h], 8.0, PANEL);
+    match &n.cover {
+        Some(p) => batch.picture_owned(p, x + 6.0, y + 6.0, cover, cover, rgba(255, 255, 255, 255)),
+        None => rounded(
+            batch,
+            atlas,
+            [x + 6.0, y + 6.0, cover, cover],
+            5.0,
+            rgba(60, 60, 75, 255),
+        ),
+    }
+    batch.text(
+        atlas,
+        &title,
+        text_x,
+        y + 7.0,
+        rgba(255, 255, 255, 255),
+        false,
+    );
+    batch.text(atlas, &artist, text_x, y + 18.0, DIM, false);
+    if n.length > 0.0 {
+        let (by, bw) = (y + 33.0, text_w);
+        let done = ((t / n.length) as f32).clamp(0.0, 1.0);
+        rounded(
+            batch,
+            atlas,
+            [text_x, by, bw, 3.0],
+            1.5,
+            rgba(255, 255, 255, 50),
+        );
+        rounded(
+            batch,
+            atlas,
+            [text_x, by, (bw * done).max(3.0), 3.0],
+            1.5,
+            ACCENT,
+        );
+    }
+    if !n.running {
+        batch.text(
+            atlas,
+            "II",
+            x + 6.0 + cover - 10.0,
+            y + 6.0 + cover - 10.0,
+            rgba(255, 255, 255, 230),
+            true,
+        );
+    }
+}
+
+/// Top centre: the line being sung, its sung words lit.
+fn draw_pill(batch: &mut HudBatch, atlas: &HudAtlas, line: &Line, t: f64, alpha: f32) {
+    let text: Vec<&str> = line.words.iter().map(|w| w.text.as_str()).collect();
+    let full = text.join(" ");
+    let tw = HudBatch::text_width(atlas, &full);
+    let (h, pad) = (16.0, 10.0);
+    let w = tw + pad * 2.0;
+    let x = (batch.width - w) * 0.5;
+    let start = batch.vertices.len();
+    rounded(batch, atlas, [x, 5.0, w, h], h * 0.5, PANEL);
+    let mut wx = x + pad;
+    for word in &line.words {
+        let color = if t >= word.at {
+            ACCENT
+        } else {
+            rgba(255, 255, 255, 140)
+        };
+        wx += batch.text(atlas, &word.text, wx, 9.0, color, false);
+        wx += HudBatch::text_width(atlas, " ");
+    }
+    batch.alpha_since(start, alpha);
 }
 
 fn batch_width(
