@@ -2694,6 +2694,7 @@ struct Game<'a> {
     waypoints: horizon_client::locator_bar::ClientWaypoints,
     /// The camera the last frame drew from (position, yaw, pitch, fov), for the locator bar.
     locator_camera: Option<([f64; 3], f32, f32, f32)>,
+    sky_lyrics: extras::sky_lyrics::SkyLyrics,
     native_camera_frame: Option<horizon_client::mod_api::NativeCamera>,
     native_tasks: native_tasks::NativeTasks,
     /// The yaw and pitch a native mod's camera drew the last frame from (`native_camera_pose`),
@@ -10018,7 +10019,9 @@ impl Game<'_> {
                 )
             )
         {
-            if !self.touch_synthetic_input() {self.input_keyboard_used();}
+            if !self.touch_synthetic_input() {
+                self.input_keyboard_used();
+            }
         }
         if let WindowEvent::KeyboardInput { event, .. } = &event
             && event.state == ElementState::Pressed
@@ -11873,6 +11876,7 @@ impl<'a> Game<'a> {
             waypoint_styles: prepared.waypoint_styles,
             waypoints: Default::default(),
             locator_camera: None,
+            sky_lyrics: Default::default(),
             native_camera_frame: None,
             native_tasks: native_tasks::NativeTasks::new(),
             posed_rotation: None,

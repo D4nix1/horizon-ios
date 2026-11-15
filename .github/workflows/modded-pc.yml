@@ -1,0 +1,35 @@
+name: modded-pc
+# Builds the modded-pc branch (sky lyrics) for Linux and Windows and uploads the binaries.
+on:
+  push:
+    branches: [modded-pc]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            name: linux-x86_64
+            exe: ''
+          - os: windows-latest
+            name: windows-x64
+            exe: .exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --profile fast -p horizon-client
+      - uses: actions/upload-artifact@v4
+        with:
+          name: horizon-modded-${{ matrix.name }}
+          path: target/fast/horizon-client${{ matrix.exe }}
+          if-no-files-found: error

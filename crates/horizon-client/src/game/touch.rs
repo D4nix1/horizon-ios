@@ -1480,7 +1480,7 @@ impl Game<'_> {
         if let Some(touch::desktop::Action::Move(x, y)) = self.touch.cursor.tick(now) {
             self.touch_cursor_motion(event_loop, (x, y));
         }
-        let had_pending=!self.touch.cursor_pending.is_empty();
+        let had_pending = !self.touch.cursor_pending.is_empty();
         while let Some(edge) = self.touch.cursor_pending.first() {
             if edge.due > self.frames {
                 break;
@@ -1545,7 +1545,8 @@ impl Game<'_> {
                 break;
             }
         }
-        if had_pending && self.touch.cursor_pending.is_empty()
+        if had_pending
+            && self.touch.cursor_pending.is_empty()
             && !self.hardware_hides_touch()
             && let Some(at) = self.touch.cursor.position
         {
