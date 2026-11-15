@@ -278,7 +278,11 @@ fn build_lists_mods(built: &str) -> bool {
 /// author's own build that has no [`BUILD_INFO`]), trait mods are installed, or the launcher wrote
 /// their ids into [`BUILD_INFO`] beside the executable. A release or Nightly has none of them.
 pub(super) fn built_with_native_mods() -> bool {
-    option_env!("HORIZON_MIXIN_MODS").is_some_and(|mods| !mods.is_empty())
+    // modded-pc: LyricsPlus is compiled in, and its fonts and album covers live in the mod image
+    // slot, which the atlas only reserves when this is true.
+    const LYRICSPLUS_BUILT_IN: bool = true;
+    LYRICSPLUS_BUILT_IN
+        || option_env!("HORIZON_MIXIN_MODS").is_some_and(|mods| !mods.is_empty())
         || !crate::mod_api::mods().is_empty()
         || std::env::current_exe()
             .ok()
