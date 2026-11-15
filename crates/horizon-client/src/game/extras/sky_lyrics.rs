@@ -10,6 +10,7 @@ use super::super::Game;
 use horizon_client::hud::{HudBatch, rgba};
 use horizon_client::text::{Style, Text};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -106,12 +107,91 @@ pub fn parse(src: &str) -> Song {
 
 #[derive(Default)]
 pub(in crate::game) struct SkyLyrics {
-    song: Option<Song>,
+    song: Option<Arc<Song>>,
     started: Option<Instant>,
     modified: Option<SystemTime>,
     checked: Option<Instant>,
     /// The sky direction the lyrics hang at: yaw when the song started.
     anchor_yaw: f32,
+    /// What the system's media player plays (`playerctl`), read on a thread of its own.
+    playing: Option<Arc<Mutex<NowPlaying>>>,
+    track: String,
+}
+
+/// The playing track, its lyrics and its position when last read.
+#[derive(Default)]
+struct NowPlaying {
+    key: String,
+    song: Option<Arc<Song>>,
+    position: f64,
+    read: Option<Instant>,
+    running: bool,
+}
+
+/// `playerctl` speaks MPRIS: Spotify, browsers, VLC, mpv... on Linux.
+// shortcut: Linux only (MPRIS); Windows needs GlobalSystemMediaTransportControls, add it when someone plays there.
+fn now_playing() -> Option<(String, String, f64, bool)> {
+    let out = std::process::Command::new("playerctl")
+        .args([
+            "metadata",
+            "--format",
+            "{{artist}}\t{{title}}\t{{position}}\t{{status}}",
+        ])
+        .output()
+        .ok()?;
+    let text = String::from_utf8(out.stdout).ok()?;
+    let mut f = text.trim_end().split('\t');
+    let (artist, title) = (f.next()?.to_string(), f.next()?.to_string());
+    let position = f.next()?.parse::<f64>().ok()? / 1e6;
+    (!title.is_empty()).then_some((artist, title, position, f.next() == Some("Playing")))
+}
+
+/// Timed lyrics from LRCLIB (free, no key). Word-stamped (`<mm:ss>`) lyrics are word-synced;
+/// line-timed ones get their words spread over the line.
+fn fetch_lyrics(artist: &str, title: &str) -> Option<Song> {
+    let body: serde_json::Value = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(10))
+        .user_agent("Horizon sky lyrics")
+        .build()
+        .get("https://lrclib.net/api/search")
+        .query("artist_name", artist)
+        .query("track_name", title)
+        .call()
+        .ok()?
+        .into_string()
+        .ok()
+        .and_then(|b| serde_json::from_str(&b).ok())?;
+    let synced = body
+        .as_array()?
+        .iter()
+        .find_map(|r| r.get("syncedLyrics")?.as_str())?;
+    Some(parse(synced))
+}
+
+fn watch(shared: Arc<Mutex<NowPlaying>>) {
+    loop {
+        let read = now_playing();
+        let key = read
+            .as_ref()
+            .map(|(a, t, ..)| format!("{a}\t{t}"))
+            .unwrap_or_default();
+        let changed = shared.lock().is_ok_and(|n| n.key != key);
+        let song = if changed && let Some((artist, title, ..)) = &read {
+            fetch_lyrics(artist, title).map(Arc::new)
+        } else {
+            None
+        };
+        if let Ok(mut n) = shared.lock() {
+            if changed {
+                n.key = key;
+                n.song = song;
+            }
+            if let Some((_, _, position, running)) = read {
+                (n.position, n.running, n.read) = (position, running, Some(Instant::now()));
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
 }
 
 fn path() -> PathBuf {
@@ -133,17 +213,43 @@ impl Game<'_> {
             let modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
             if modified != s.modified {
                 s.modified = modified;
-                s.song = std::fs::read_to_string(&path).ok().map(|t| parse(&t));
+                s.song = std::fs::read_to_string(&path)
+                    .ok()
+                    .map(|t| Arc::new(parse(&t)));
                 s.started = Some(now);
                 s.anchor_yaw = self.yaw;
             }
         }
-        let (Some(song), Some(started), Some((_, yaw, pitch, fov))) =
-            (&s.song, s.started, self.locator_camera)
-        else {
+        // A file wins; otherwise what the media player plays.
+        let (song, t) = if let (Some(song), Some(started)) = (&s.song, s.started) {
+            (song.clone(), now.duration_since(started).as_secs_f64())
+        } else {
+            let shared = s.playing.get_or_insert_with(|| {
+                let shared = Arc::new(Mutex::new(NowPlaying::default()));
+                let thread = shared.clone();
+                let _ = std::thread::Builder::new()
+                    .name("sky lyrics".into())
+                    .spawn(move || watch(thread));
+                shared
+            });
+            let Ok(n) = shared.lock() else { return };
+            let (Some(song), Some(read)) = (n.song.clone(), n.read) else {
+                return;
+            };
+            if n.key != s.track {
+                s.track = n.key.clone();
+                s.anchor_yaw = self.yaw;
+            }
+            let since = if n.running {
+                now.duration_since(read).as_secs_f64()
+            } else {
+                0.0
+            };
+            (song, n.position + since)
+        };
+        let Some((_, yaw, pitch, fov)) = self.locator_camera else {
             return;
         };
-        let t = now.duration_since(started).as_secs_f64();
         let Some(i) = song.lines.iter().rposition(|l| l.at <= t) else {
             return;
         };
