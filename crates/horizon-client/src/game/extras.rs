@@ -9,7 +9,6 @@
 pub(in crate::game) mod mouse_tweaks;
 pub(in crate::game) mod pvp;
 mod reconnect;
-pub(in crate::game) mod sky_lyrics;
 mod sorting;
 
 use super::{Dim, Game, Screen, native_hooks::NativeMinimap};
@@ -216,7 +215,6 @@ impl Game<'_> {
             extras_hud::draw_minimap(batch, atlas, &mut corners, &look);
         }
         self.draw_pvp_hud(batch, &mut corners);
-        self.draw_sky_lyrics(batch);
         self.native_hud(batch, &mut corners);
         // The layers crates registered (`horizon_hooks::hud`): none, no canvas.
         let layers = horizon_hooks::hud::engine::all();

@@ -113,6 +113,62 @@ fn draw_logo(atlas: &HudAtlas, batch: &mut HudBatch, w: f32) {
     );
 }
 
+/// The main menu's first button: a little below the middle, room above for the wordmark.
+fn main_column_top(h: f32) -> f32 {
+    ((h * 0.5).floor() - 20.0).max(96.0)
+}
+
+const GLASS: u32 = rgba(12, 12, 18, 150);
+const GLASS_HOVER: u32 = rgba(255, 255, 255, 46);
+const ACCENT: u32 = rgba(110, 168, 255, 255);
+
+/// The modded main menu's look: a dark wash over the panorama, a glowing wordmark, a bottom bar.
+fn draw_modern_backdrop(atlas: &HudAtlas, batch: &mut HudBatch, w: f32, h: f32, seconds: f32) {
+    batch.fill_gradient(atlas, (0.0, 0.0, w, h), rgba(6, 8, 16, 120), rgba(6, 8, 16, 200));
+    // Side vignette, darker at the edges.
+    let edge = (w * 0.25).floor();
+    batch.fill_gradient_h(atlas, (0.0, 0.0, edge, h), rgba(0, 0, 0, 140), 0);
+    batch.fill_gradient_h(atlas, (w - edge, 0.0, edge, h), 0, rgba(0, 0, 0, 140));
+    let word = lang::get_or("horizon.title.wordmark", "HORIZON");
+    let tw = HudBatch::text_width(atlas, &word);
+    let scale = 4.0;
+    let (cx, top) = ((w / 2.0).floor(), main_column_top(h) - 64.0);
+    let x = cx - tw * scale / 2.0;
+    // A slow breathing glow behind the letters.
+    let pulse = 0.75 + 0.25 * (seconds * 1.6).sin();
+    let start = batch.vertices.len();
+    for (ring, a) in [(1.5f32, 28.0f32), (0.9, 50.0), (0.45, 80.0)] {
+        for n in 0..8 {
+            let ang = n as f32 * std::f32::consts::FRAC_PI_4;
+            let glow = (ACCENT & 0x00FF_FFFF) | (((a * pulse) as u32) << 24);
+            batch.text(atlas, &word, ring * ang.cos(), ring * ang.sin(), glow, false);
+        }
+    }
+    batch.text(atlas, &word, 0.0, 0.0, u32::MAX, false);
+    for v in &mut batch.vertices[start..] {
+        v.pos = [x + v.pos[0] * scale, top + v.pos[1] * scale];
+    }
+    let sub = format!("Minecraft {}", horizon_core::VANILLA_VERSION);
+    let sw = HudBatch::text_width(atlas, &sub);
+    batch.text(atlas, &sub, cx - sw / 2.0, top + 9.0 * scale + 4.0, rgba(190, 200, 220, 220), false);
+    // The bottom bar the version and notice sit on.
+    batch.fill(atlas, 0.0, h - 14.0, w, 14.0, rgba(0, 0, 0, 110));
+    batch.fill(atlas, 0.0, h - 14.0, w, 1.0, rgba(255, 255, 255, 24));
+}
+
+/// A main-menu button: a rounded glass pill, lighter with an accent bar while hovered.
+fn draw_modern_button(atlas: &HudAtlas, batch: &mut HudBatch, b: &Button, hover: bool) {
+    let rect = [b.x, b.y, b.w, 20.0];
+    let radius = if b.w <= 20.0 { 6.0 } else { 7.0 };
+    batch.fill_rounded(atlas, rect, radius, GLASS);
+    if hover {
+        batch.fill_rounded(atlas, rect, radius, GLASS_HOVER);
+        if b.w > 20.0 {
+            batch.fill_rounded(atlas, [b.x + 4.0, b.y + 6.0, 2.0, 8.0], 1.0, ACCENT);
+        }
+    }
+}
+
 /// `OptimizeWorldScreen.DIMENSION_COLORS`.
 fn dimension_color(level: &str) -> u32 {
     match level {
@@ -466,6 +522,8 @@ pub struct Title {
     splash: Option<String>,
     /// `SplashManager.getSplash` rolled the player's own name instead of a list entry.
     splash_you: bool,
+    /// The modded client's main menu (glass buttons, wordmark); false draws vanilla's.
+    pub modern: bool,
     /// The saves listed for Home, re-read every couple of seconds.
     recent: std::cell::RefCell<Option<(std::time::Instant, Vec<WorldEntry>)>>,
     /// WorldCreationGameRulesScreen, over Create New World while it is open.
@@ -861,6 +919,7 @@ impl Title {
             icons: RefCell::new(std::collections::HashMap::new()),
             splash: choose_splash(&splashes, splash_index, (today.month(), today.day())),
             splash_you,
+            modern: std::env::var_os("HORIZON_VANILLA_MENU").is_none(),
             recent: std::cell::RefCell::new(None),
             rules: RefCell::new(None),
             onboarding_finished: false,
@@ -1920,7 +1979,13 @@ impl Title {
         match &self.mode {
             Mode::Main => {
                 let cx = (w / 2.0).floor();
-                let y = (h / 4.0).floor() + 48.0;
+                let y = if self.modern {
+                    main_column_top(h)
+                } else {
+                    (h / 4.0).floor() + 48.0
+                };
+                // Vanilla: Options and Quit at +96, the icons at +72; modded: the reverse, closer.
+                let (row, icon_row) = if self.modern { (76.0, 108.0) } else { (96.0, 72.0) };
                 let mut buttons = vec![
                     b(
                         cx - 100.0,
@@ -1950,7 +2015,7 @@ impl Title {
                     ),
                     b(
                         cx - 100.0,
-                        y + 96.0,
+                        y + row,
                         98.0,
                         &lang::get_or("menu.options", "Options..."),
                         true,
@@ -1959,7 +2024,7 @@ impl Title {
                     .does(crate::widgets::Action::Options),
                     b(
                         cx + 2.0,
-                        y + 96.0,
+                        y + row,
                         98.0,
                         &lang::get_or("menu.quit", "Quit Game"),
                         true,
@@ -1984,7 +2049,7 @@ impl Title {
                 for (i, &(key, plain, id, icon)) in icons.iter().enumerate() {
                     let mut button = b(
                         start + i as f32 * 24.0,
-                        y + 72.0,
+                        y + icon_row,
                         20.0,
                         &lang::get_or(key, plain),
                         id != 5 || crate::multiplayer::has_title_entry(),
@@ -2743,8 +2808,15 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         }
         match &self.mode {
             Mode::Main => {
-                draw_logo(atlas, batch, w);
-                if !hide_splash && let Some(splash) = self.splash.as_deref() {
+                if self.modern {
+                    draw_modern_backdrop(atlas, batch, w, h, self.started.elapsed().as_secs_f32());
+                } else {
+                    draw_logo(atlas, batch, w);
+                }
+                if !self.modern
+                    && !hide_splash
+                    && let Some(splash) = self.splash.as_deref()
+                {
                     let tw = HudBatch::text_width(atlas, splash);
                     let start = batch.vertices.len();
                     batch.text(
@@ -2772,7 +2844,11 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                     }
                 }
                 let version = format!("Horizon {} (Rusted)", horizon_core::VANILLA_VERSION);
-                batch.text(atlas, &version, 2.0, h - 10.0, u32::MAX, true);
+                if self.modern {
+                    batch.text(atlas, &version, 4.0, h - 11.0, rgba(200, 205, 220, 255), false);
+                } else {
+                    batch.text(atlas, &version, 2.0, h - 10.0, u32::MAX, true);
+                }
                 // A nightly names its build in the top-left corner, the one spot no button reaches at any GUI
                 // scale, so screenshots and reports say which build they come from.
                 if let Some(nightly) = horizon_core::release::nightly_label() {
@@ -2786,7 +2862,11 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 // high at `height - 10`; `extractContents` underlines it while
                 // hovered or focused, and its press opens the credits.
                 let tw = HudBatch::text_width(atlas, notice).ceil();
-                let rect = [w - tw - 2.0, h - 10.0, tw, 10.0];
+                let rect = if self.modern {
+                    [w - tw - 4.0, h - 11.0, tw, 10.0]
+                } else {
+                    [w - tw - 2.0, h - 10.0, tw, 10.0]
+                };
                 self.credits_button.set(rect);
                 crate::widgets::record(notice, rect, true);
                 let inside = cursor.0 >= rect[0]
@@ -2798,7 +2878,12 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 if inside {
                     text = text.underlined();
                 }
-                batch.text_styled(atlas, &text, rect[0], rect[1], u32::MAX, true);
+                let (ink, shadow) = if self.modern {
+                    (rgba(200, 205, 220, 255), false)
+                } else {
+                    (u32::MAX, true)
+                };
+                batch.text_styled(atlas, &text, rect[0], rect[1], ink, shadow);
             }
             Mode::Select { worlds, selected } => {
                 crate::ui::menu_background(batch, atlas, 0.0, 0.0, w, h, false);
@@ -3477,8 +3562,12 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             } else {
                 "gui/sprites/widget/button"
             };
+            let modern = self.modern && matches!(self.mode, Mode::Main);
+            if modern {
+                draw_modern_button(atlas, batch, &b, hover);
+            }
             // Nine-slice approximation: left and right halves of the 200-wide sprite.
-            if let Some(r) = atlas.sprites.get(sprite).copied() {
+            if !modern && let Some(r) = atlas.sprites.get(sprite).copied() {
                 let half = b.w / 2.0;
                 let mut left = r;
                 left.u1 = r.u0 + (r.u1 - r.u0) * (half / r.w as f32);
@@ -5592,6 +5681,7 @@ mod classic_tests {
             );
         }
         let mut title = Title::new(PathBuf::new(), root);
+        title.modern = false;
         title.splash = Some("Visible splash!".into());
         let mut batch = HudBatch::new([1920, 1080]);
         title.draw(&atlas, &mut batch, (0.0, 0.0), false);

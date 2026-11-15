@@ -1566,6 +1566,7 @@ dependencies = [
  "horizon-world",
  "java_regex",
  "log",
+ "lyricsplus-engine",
  "miniz_oxide 0.8.9",
  "naga",
  "objc2 0.6.5",
@@ -2776,6 +2777,16 @@ name = "lru-slab"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
+
+[[package]]
+name = "lyricsplus-engine"
+version = "1.0.0"
+dependencies = [
+ "ab_glyph",
+ "serde",
+ "serde_json",
+ "ureq",
+]
 
 [[package]]
 name = "lz4_flex"

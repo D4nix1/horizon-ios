@@ -250,6 +250,8 @@ mod llamas;
 mod loading_screen;
 mod loading_window;
 mod locator_bar;
+/// LyricsPlus (MIT): synced lyrics, the now-playing card and island, its menu on K.
+mod lyricsplus;
 mod loom;
 mod mace;
 mod machines;
@@ -2694,7 +2696,6 @@ struct Game<'a> {
     waypoints: horizon_client::locator_bar::ClientWaypoints,
     /// The camera the last frame drew from (position, yaw, pitch, fov), for the locator bar.
     locator_camera: Option<([f64; 3], f32, f32, f32)>,
-    sky_lyrics: extras::sky_lyrics::SkyLyrics,
     native_camera_frame: Option<horizon_client::mod_api::NativeCamera>,
     native_tasks: native_tasks::NativeTasks,
     /// The yaw and pitch a native mod's camera drew the last frame from (`native_camera_pose`),
@@ -11876,7 +11877,6 @@ impl<'a> Game<'a> {
             waypoint_styles: prepared.waypoint_styles,
             waypoints: Default::default(),
             locator_camera: None,
-            sky_lyrics: Default::default(),
             native_camera_frame: None,
             native_tasks: native_tasks::NativeTasks::new(),
             posed_rotation: None,

@@ -2187,6 +2187,29 @@ impl HudBatch {
             });
         }
     }
+    /// [`HudBatch::fill_gradient`] from left to right.
+    pub fn fill_gradient_h(
+        &mut self,
+        atlas: &HudAtlas,
+        (x, y, w, h): (f32, f32, f32, f32),
+        left: u32,
+        right: u32,
+    ) {
+        let r = atlas.white;
+        let uv = [(r.u0 + r.u1) / 2.0, (r.v0 + r.v1) / 2.0];
+        let p = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+        let c = [left, right, right, left];
+        for i in [0, 1, 2, 0, 2, 3] {
+            self.vertices.push(HudVertex {
+                pos: p[i],
+                uv,
+                color: c[i],
+                depth: 0.0,
+                glint_uv: [0.0, 0.0],
+                text: 0,
+            });
+        }
+    }
     pub fn text_width(atlas: &HudAtlas, text: &str) -> f32 {
         atlas.font.width(text)
     }

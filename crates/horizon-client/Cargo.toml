@@ -11,6 +11,8 @@ autoexamples = false
 autotests = false
 
 [dependencies]
+# LyricsPlus (MIT, FRK and its Horizon port), built in on the modded-pc branch.
+lyricsplus-engine = { path = "../lyricsplus-engine" }
 horizon-cosmetics = { path = "../horizon-cosmetics" }
 horizon-client-lib = { path = "../horizon-client-lib", default-features = false }
 horizon-assets = { path = "../horizon-assets" }

@@ -126,6 +126,32 @@ impl HudBatch {
         }
     }
 
+    /// A rectangle with round corners in one colour (GUI px), as one fan from its centre.
+    pub fn fill_rounded(
+        &mut self,
+        atlas: &HudAtlas,
+        [x, y, w, h]: [f32; 4],
+        radius: f32,
+        color: u32,
+    ) {
+        let r = radius.min(w * 0.5).min(h * 0.5).max(0.0);
+        let corners = [
+            (x + w - r, y + r, -90.0f32),
+            (x + w - r, y + h - r, 0.0),
+            (x + r, y + h - r, 90.0),
+            (x + r, y + r, 180.0),
+        ];
+        let mut rim = Vec::with_capacity(4 * 9 + 1);
+        for (cx, cy, from) in corners {
+            for k in 0..=8 {
+                let a = (from + 90.0 * k as f32 / 8.0).to_radians();
+                rim.push([cx + r * a.cos(), cy + r * a.sin()]);
+            }
+        }
+        rim.push(rim[0]);
+        self.fill_fan(atlas, [x + w * 0.5, y + h * 0.5], &rim, color);
+    }
+
     /// An annular sector in one colour: between radii `r0` and `r1` (GUI px, snapped to whole
     /// px) from `angles[0]` to `angles[1]` (radians from up, clockwise), cut into
     /// [`arc_segments`]. With `r0` 0 it is a pie slice; a span of `TAU` is a whole ring.
