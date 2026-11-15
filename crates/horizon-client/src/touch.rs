@@ -374,6 +374,11 @@ pub struct Touches {
 }
 
 impl Touches {
+    /// A real finger is still down. A latched forward lock alone is not activity.
+    pub fn has_contact(&self) -> bool {
+        !self.fingers.is_empty()
+    }
+
     /// A finger went down at `at`, `now` seconds into some clock.
     pub fn start(
         &mut self,

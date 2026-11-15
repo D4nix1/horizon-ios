@@ -398,6 +398,7 @@ impl Game<'_> {
         #[cfg(target_os = "ios")]
         self.touch_native_frame(event_loop);
         let playing = self.touch_playing();
+        self.touch_refresh_activity(playing);
         #[cfg(target_os = "ios")]
         self.touch_cursor_frame(event_loop, playing);
         if playing {
@@ -428,6 +429,15 @@ impl Game<'_> {
             .and_then(|()| self.touch_act(out, scale));
         if let Err(e) = result {
             log::warn!("Horizon: touch: {e}");
+        }
+    }
+
+    /// UIKit need not send moves while a finger holds the same position.
+    /// Keep a physical gameplay hold out of AFK throttling without letting a
+    /// latched forward-lock or an unfocused window count as fresh input.
+    fn touch_refresh_activity(&mut self, playing: bool) {
+        if playing && self.focused && self.touch.fingers.has_contact() {
+            self.last_input = Instant::now();
         }
     }
 
