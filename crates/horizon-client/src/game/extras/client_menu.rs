@@ -72,6 +72,14 @@ impl Tile {
     ];
     /// The name on the tile; World Tint names its colour too.
     fn label(self, g: &Game<'_>) -> String {
+        if self == Tile::LyricWords {
+            let (_, key, plain) = super::sky_lyrics::MODES[g.sky_shows().mode];
+            return format!(
+                "{} · {}",
+                lang::get_or("horizon.client.lyrics", "Lyrics"),
+                lang::get_or(key, plain)
+            );
+        }
         if self == Tile::WorldTint {
             let (key, plain, _) = super::visuals::TINTS[g.visual_shows().tint_mode];
             return format!(
@@ -121,6 +129,15 @@ impl Tile {
     }
     /// A click: the left button switches the tile; the right one cycles World Tint's colour.
     fn press(self, g: &mut Game<'_>, button: i32) {
+        if self == Tile::LyricWords && button == 1 {
+            let mut shows = g.sky_shows();
+            shows.mode = (shows.mode + 1) % super::sky_lyrics::MODES.len();
+            shows.words = true;
+            g.native_set_setting(ID, "lyrics_mode", &shows.mode.to_string());
+            g.native_set_setting(ID, "lyric_words", "true");
+            g.sky_lyrics.shows.set(Some(shows));
+            return;
+        }
         if matches!(self, Tile::JumpCircles | Tile::Trail | Tile::WorldTint) {
             let mut shows = g.visual_shows();
             let set = |g: &Game<'_>, key: &str, on: bool| {

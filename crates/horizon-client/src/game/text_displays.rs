@@ -422,6 +422,8 @@ impl Game<'_> {
         self.text_displays = displays;
         // The client menu's jump circles and trail (modded-pc), in the text displays' pass.
         self.visuals_world(camera, normal);
+        // The sky lyrics' World words (modded-pc): blocks in front of them hide them.
+        self.sky_lyrics_world(camera, normal);
     }
 }
 

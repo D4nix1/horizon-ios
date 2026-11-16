@@ -74,19 +74,20 @@ pub(in crate::game) fn hue(h: f32) -> (u8, u8, u8) {
     ((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
 }
 
-/// One flat-coloured quad (corners in order) into `out`, as two triangles.
+/// One flat-coloured quad (corners in order) into `out`: the world pass takes four vertices a
+/// quad, and it goes in both windings, so it shows from above and below and either way round.
 fn quad(out: &mut Vec<Vertex>, uv: [f32; 2], corners: [[f32; 3]; 4], colors: [u32; 4]) {
-    for i in [0, 1, 2, 0, 2, 3] {
-        out.push(Vertex {
-            pos: corners[i],
-            uv,
-            layer: horizon_client::gfx::TEXT_POLYGON_OFFSET_OVERLAY,
-            color: colors[i],
-            light: FULL_LIGHT,
-            normal: [0; 4],
-            glint_uv: [0.0, 0.0],
-        });
-    }
+    let vertex = |i: usize| Vertex {
+        pos: corners[i],
+        uv,
+        layer: horizon_client::gfx::TEXT_POLYGON_OFFSET_OVERLAY,
+        color: colors[i],
+        light: FULL_LIGHT,
+        normal: [0; 4],
+        glint_uv: [0.0, 0.0],
+    };
+    out.extend([0, 1, 2, 3].map(vertex));
+    out.extend([3, 2, 1, 0].map(vertex));
 }
 
 /// A flat ring on the ground around `centre` (camera-relative), from radius `inner` to `outer`,
@@ -332,7 +333,7 @@ mod tests {
     fn a_ring_is_whole_quads_around_its_centre() {
         let mut out = Vec::new();
         ring(&mut out, [0.0; 2], [1.0, 2.0, 3.0], 0.5, 1.0, 0.0, 255);
-        assert_eq!(out.len() % 6, 0);
+        assert_eq!(out.len() % 4, 0);
         for v in &out {
             let (dx, dz) = (v.pos[0] - 1.0, v.pos[2] - 3.0);
             let r = (dx * dx + dz * dz).sqrt();
