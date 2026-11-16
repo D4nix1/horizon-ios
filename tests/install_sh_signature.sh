@@ -12,6 +12,9 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 openssl version | grep -Eq '^OpenSSL [3-9]\.' || { echo "skip: OpenSSL 3 needed"; exit 77; }
 W=$(mktemp -d "${TMPDIR:-/tmp}/horizon-signature-test.XXXXXXXX") || exit 1; trap 'rm -rf "$W"' EXIT
 fails=0
+sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi
+}
 check() {  # name, expected exit (0 or 1), output grep (may be empty), then the case's exit and output files
   local name=$1 want=$2 pat=$3 rc=$4 out=$5
   local exit_ok=no
@@ -38,7 +41,7 @@ title() {  # tag also: the release's GitHub title
 }
 json() {  # dir tag with-sums [title]: GitHub's release JSON, as install.sh reads it
   local d=$1 tag=$2 sums=$3 name=${4:-$2} sha
-  sha=$(sha256sum "$d/files/horizon-server-linux-x86_64.tar.gz" | cut -d' ' -f1)
+  sha=$(sha256 "$d/files/horizon-server-linux-x86_64.tar.gz" | cut -d' ' -f1)
   {
     printf '{\n  "tag_name": "%s",\n  "name": "%s",\n  "assets": [\n' "$tag" "$name"
     printf '    {\n      "name": "horizon-server-linux-x86_64.tar.gz",\n      "digest": "sha256:%s",\n      "browser_download_url": "https://dl.test/horizon-server-linux-x86_64.tar.gz"\n    }' "$sha"
@@ -50,7 +53,7 @@ json() {  # dir tag with-sums [title]: GitHub's release JSON, as install.sh read
 }
 # Tools install.sh may use, without openssl (the "no OpenSSL" case).
 mkdir "$W/nossl"
-for t in sh bash cat awk sed grep cut head find mkdir mktemp rm mv ln chmod cp basename dirname tar gzip sha256sum ls uname printf; do
+for t in sh bash cat awk sed grep cut head find mkdir mktemp rm mv ln chmod cp basename dirname tar gzip sha256sum shasum ls uname printf; do
   p=$(command -v "$t") && ln -s "$p" "$W/nossl/$t"
 done
 # The fake curl: the API address answers with release.json, any other address with the file of that name.
@@ -129,7 +132,7 @@ run "$d" "$P" --version v1.2.3; verdict "tampered archive refused" 1 "doesn't ma
 # 4. Tampered SHA256SUMS (the archive's line swapped for the hash of the tampered archive).
 d=$W/sums; make_release "$d" v1.2.3; with_key "$d"
 printf 'x' >> "$d/files/horizon-server-linux-x86_64.tar.gz"
-new=$(sha256sum "$d/files/horizon-server-linux-x86_64.tar.gz" | cut -d' ' -f1)
+new=$(sha256 "$d/files/horizon-server-linux-x86_64.tar.gz" | cut -d' ' -f1)
 printf '%s  horizon-server-linux-x86_64.tar.gz\n' "$new" > "$d/files/SHA256SUMS"; json "$d" v1.2.3 yes
 run "$d" "$P" --version v1.2.3; verdict "tampered SHA256SUMS refused" 1 "signature doesn't match" "$d"
 

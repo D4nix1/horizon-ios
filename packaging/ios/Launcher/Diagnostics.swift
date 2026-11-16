@@ -67,6 +67,17 @@ enum Diagnostics {
             return hidingContinuation ? "[redacted continuation]" : safe
         }.joined(separator:"\n")
     }
+
+    /// Trim only after redaction, preserving complete recent lines and valid UTF-8.
+    static func exportTail(_ text: String, maximum: Int) -> String {
+        let data = Data(text.utf8)
+        guard data.count > maximum else {return text}
+        let marker = "[older lines omitted]\n"
+        guard maximum > marker.utf8.count else {return ""}
+        let suffix = String(decoding: data.suffix(maximum - marker.utf8.count), as: UTF8.self)
+        guard let newline = suffix.firstIndex(of: "\n") else {return marker}
+        return marker + suffix[suffix.index(after: newline)...]
+    }
     static func export(folder: URL = directory, gameFolder: URL? = nil) throws -> URL {
         // Export reads bounded snapshots without holding the launcher writer lock.
         let fm = FileManager.default
@@ -75,10 +86,15 @@ enum Diagnostics {
         let destination = exportDir.appendingPathComponent("Horizon-diagnostics.txt")
         var output = "Horizon mobile diagnostics\nVersion: \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") ?? "unknown") Build: \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "unknown")\niOS: \(ProcessInfo.processInfo.operatingSystemVersionString)\nSensitive lines and common identifiers are redacted. Review before sharing.\n"
         let gameHome = gameFolder ?? ProcessInfo.processInfo.environment["HORIZON_HOME"].map {URL(fileURLWithPath:$0)} ?? fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("horizon")
-        for (label,url) in [("Launcher previous",folder.appendingPathComponent("launcher-previous.log")),("Launcher current",folder.appendingPathComponent("launcher.log")),("Game previous",gameHome.appendingPathComponent("logs/previous.log")),("Game current",gameHome.appendingPathComponent("logs/latest.log"))] {
-            output += "\n--- \(label) ---\n"
-            if fm.fileExists(atPath:url.path) {output += String(decoding: bounded(redactExport(try read(url))), as:UTF8.self)}
-            else {output += "No log recorded yet.\n"}
+        let entries = [("Launcher previous",folder.appendingPathComponent("launcher-previous.log")),("Launcher current",folder.appendingPathComponent("launcher.log")),("Game previous",gameHome.appendingPathComponent("logs/previous.log")),("Game current",gameHome.appendingPathComponent("logs/latest.log"))]
+        let headings = entries.map { "\n--- \($0.0) ---\n" }
+        let overhead = output.utf8.count + headings.reduce(0) { $0 + $1.utf8.count }
+        let budget = max(0, 4 * limit - overhead) / entries.count
+        for (index, entry) in entries.enumerated() {
+            output += headings[index]
+            let text = fm.fileExists(atPath:entry.1.path)
+                ? redactExport(try read(entry.1)) : "No log recorded yet.\n"
+            output += exportTail(text, maximum: budget)
         }
         try bounded(output, maximum: 4 * limit).write(to:destination,options:.atomic)
         return destination

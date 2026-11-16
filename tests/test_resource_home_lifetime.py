@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def program():
-    game = (ROOT / 'crates/horizon-client/src/game.rs').read_text()
+    game = (ROOT / 'crates/horizon-client/src/game/resource_loader.rs').read_text()
     menu = (ROOT / 'crates/horizon-client/src/game/startup_menu.rs').read_text()
     imports = (ROOT / 'crates/horizon-client/src/import.rs').read_text()
     resource = (ROOT / 'crates/horizon-client/src/game/resource_load.rs').read_text()
@@ -23,8 +23,8 @@ def program():
     b = resource.index('    // The world tables load (above)', a)
     rest = resource[a:b]
     a = game.index('struct WorldRestLoader {')
-    b = game.index('\nimpl Game', a)
-    loader = game[a:b]
+    b = game.index('pub(super) fn write_report', a)
+    loader = (game[a:b] + game[game.index('pub(super) fn retired_rest_loaders'):]).replace('pub(super) ', '')
     if 'struct HomeGate {' in imports:
         a = imports.rfind('#[derive', 0, imports.index('struct HomeGate {'))
         b = imports.rfind('#[derive', a, imports.index('pub enum Kind'))
@@ -35,8 +35,9 @@ def program():
     mods = (ROOT / 'crates/horizon-client/src/game/mods.rs').read_text()
     prepare = 'pub ' + method(mods, 'prepare_content')
     prepare += '\n' + 'pub ' + method(mods, 'content_for_loaded_root')
+    wanted = 'pub ' + method((ROOT / 'crates/horizon-client/src/game/mods/catalog.rs').read_text(), 'wanted_ids')
     lease = f'#[path="{ROOT / "crates/horizon-assets/src/root_lease.rs"}"]mod root_lease;\n'
-    return STUBS.replace('HOME_ACCESS_FUNCTION', access).replace('PREPARE_CONTENT_FUNCTION', prepare).replace('ROOT_LEASE_MODULE', lease) + loader + '\nmod production {use super::*;\n' + startup + '\n}\n' + LOAD_PREFIX + rest + LOAD_SUFFIX + CASES
+    return STUBS.replace('HOME_ACCESS_FUNCTION', access).replace('PREPARE_CONTENT_FUNCTION', prepare).replace('ROOT_LEASE_MODULE', lease).replace('WANTED_IDS_FUNCTION', wanted) + loader + '\nmod production {use super::*;\n' + startup + '\n}\n' + LOAD_PREFIX + rest + LOAD_SUFFIX + CASES
 
 
 STUBS = r'''
@@ -58,7 +59,7 @@ static SNAPSHOT_HELD:AtomicBool=AtomicBool::new(false);
 // The rollback implementation has real filesystem tests in mod_registry/storage.rs.
 // Here its boundary records that production startup recovered the correct home before reading.
 mod mod_registry{use super::*;pub fn with_content_snapshot<T>(home:&Path,read:impl FnOnce()->T)->Result<T>{assert_eq!(home,import::home());RECOVERY_OBSERVED.store(true,Ordering::SeqCst);SNAPSHOT_HELD.store(true,Ordering::SeqCst);let result=read();SNAPSHOT_HELD.store(false,Ordering::SeqCst);Ok(result)}}
-#[derive(Clone)]struct Mods{enabled:BTreeSet<String>}
+#[derive(Clone)]struct Mods{enabled:BTreeSet<String>,disabled:BTreeSet<String>}
 #[derive(Clone)]struct Settings{resource_packs:Vec<String>,mods:Mods}
 struct Options{dev_mods:Vec<PathBuf>}
 fn launch_world(_: &Options)->Option<&str>{None}
@@ -67,11 +68,12 @@ pub fn startup_root_leased(root:&Path,_:&Vec<String>,_:&[()])->Result<(PathBuf,r
 mod mods{use super::*;
  pub struct PreparedContent{pub root:PathBuf,pub catalog:Arc<catalog::Catalog>,pub selection:Selection,pub lease:root_lease::RootLease,pub data_changed:bool}
  mod catalog{use super::*;
-  pub struct Catalog{pub entries:BTreeMap<String,()>,pub invalid:BTreeSet<String>}
+  pub struct Catalog{pub entries:BTreeMap<String,()>,pub invalid:BTreeSet<String>,pub native_ids:BTreeSet<String>}
+  impl Catalog{WANTED_IDS_FUNCTION}
   #[derive(Clone,Default)]pub struct Selection{pub enabled:BTreeSet<String>,pub entries:BTreeMap<String,()>,pub order:Vec<String>}
   pub fn read(home:&Path,_:&[PathBuf],_:&BTreeSet<String>)->std::result::Result<Arc<Catalog>,String>{
    assert_eq!(home,import::home());assert!(SNAPSHOT_HELD.load(Ordering::SeqCst),"catalog read escaped snapshot gate");
-   Ok(Arc::new(Catalog{entries:BTreeMap::from([("content.mod".into(),())]),invalid:BTreeSet::from(["broken.mod".into()])}))
+   Ok(Arc::new(Catalog{entries:BTreeMap::from([("content.mod".into(),())]),invalid:BTreeSet::from(["broken.mod".into()]),native_ids:BTreeSet::new()}))
   }
   impl Selection{pub fn wanted(enabled:&BTreeSet<String>,catalog:&Catalog)->Self{Self{enabled:enabled.clone(),entries:catalog.entries.clone(),order:vec!["content.mod".into()]}}}
  }
@@ -121,7 +123,7 @@ LOAD_SUFFIX = r'''
 CASES = r'''
 fn main(){
  let home=import::home();fs::create_dir_all(&home).unwrap();let root=home.join(".horizon-cache/mod-content/0123456789abcdef");fs::create_dir_all(&root).unwrap();fs::write(root.join("generation"),"before").unwrap();
- let settings=Settings{resource_packs:vec![],mods:Mods{enabled:BTreeSet::from(["content.mod".into(),"broken.mod".into(),"native.mod".into(),"future.mod".into()])}};let options=Options{dev_mods:vec![]};
+ let settings=Settings{resource_packs:vec![],mods:Mods{enabled:BTreeSet::from(["content.mod".into(),"broken.mod".into(),"native.mod".into(),"future.mod".into()]),disabled:BTreeSet::new()}};let options=Options{dev_mods:vec![]};
  let(rx,parent)=production::spawn_loader(&options,&settings,&root,Instant::now(),&Progress).unwrap();
  let mut loaded=loop{match rx.recv_timeout(Duration::from_secs(3)).unwrap(){LoaderMsg::Ui(..)=>{},LoaderMsg::Done(result)=>break result.unwrap()}};
  parent.join().unwrap();

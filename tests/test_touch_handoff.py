@@ -37,11 +37,12 @@ struct Batch { scale: f32, width: f32, height: f32 }
 #[derive(Clone,Copy,PartialEq,Eq)]enum MenuTarget { Pointer }
 struct MenuFinger { id: u64, gesture: MenuGesture, target: MenuTarget }
 #[derive(Default)]
-struct TouchInput { seen: bool, hardware: input_mode::InputMode,
+struct TouchInput { seen: bool, hidden: bool, more: bool, hardware: input_mode::InputMode,
     menu: Option<MenuFinger>, fingers: Touches }
 #[derive(Default)]struct Pad{in_use:bool}
 #[derive(Default)]struct EmoteWheel{controller:Option<()>}
-struct Game { emote_wheel:EmoteWheel,pad:Pad,touch: TouchInput, last_input: Instant, playing: bool,
+#[derive(Default)]struct Cosmetics{wheel:EmoteWheel}
+struct Game { cosmetics:Cosmetics, player:Option<()>,title:Option<()>,pad:Pad,touch: TouchInput, last_input: Instant, playing: bool,
     actions: Vec<Out>, buttons: Vec<bool>, menu_calls: usize }
 mod horizon_gamecontroller { pub fn keyboard_connected() -> bool { true } }
 impl Game {
@@ -50,7 +51,7 @@ impl Game {
     fn new(playing: bool, pressed: bool) -> Self {
         let mut gesture=MenuGesture::new((0.0,0.0),MenuMode::Drag);
         if pressed { gesture.frame(); gesture.frame(); }
-        Self { emote_wheel:EmoteWheel::default(),pad:Pad::default(),touch: TouchInput { menu: Some(MenuFinger { id: 1, gesture, target: MenuTarget::Pointer }),
+        Self { cosmetics:Cosmetics::default(),player:playing.then_some(()),title:None,pad:Pad::default(),touch: TouchInput { menu: Some(MenuFinger { id: 1, gesture, target: MenuTarget::Pointer }),
             ..TouchInput::default() }, last_input: Instant::now(), playing,
             actions: vec![], buttons: vec![], menu_calls: 0 }
     }
@@ -113,9 +114,9 @@ fn cancelled_menu_finger_releases_without_delayed_press() {
         fixture = fixture.replace("TOUCH_SOURCE", str(ROOT / "crates/horizon-client/src/touch.rs"))
         fixture = fixture.replace("MODE_SOURCE", str(ROOT / "crates/horizon-client/src/game/input_mode.rs"))
         fixture = fixture.replace("METHODS", "\n".join(method(name) for name in (
-            "touch_event", "touch_release_menu", "touch_keyboard_used")) + "\n" + production_method(
+            "touch_event", "touch_release_menu", "touch_keyboard_used", "visible_touch_layout")) + "\n" + production_method(
                 (ROOT / "crates/horizon-client/src/game/pad.rs").read_text(), "pad_yield_input") + "\n" + production_method(
-                (ROOT / "crates/horizon-client/src/game/emote_wheel.rs").read_text(), "cancel_emote_controller"))
+                (ROOT / "crates/horizon-client/src/game/cosmetics/emote_wheel.rs").read_text(), "cancel_emote_controller"))
         with tempfile.TemporaryDirectory(prefix="horizon-touch-handoff-") as folder:
             folder = Path(folder)
             (folder / "fixture.rs").write_text(fixture)

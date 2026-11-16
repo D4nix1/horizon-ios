@@ -3,6 +3,28 @@ import UIKit
 @testable import LauncherPreview
 
 final class FormattingTests: XCTestCase {
+    func testFullDiagnosticsExportPreservesNewestGameFailureWithinBudget() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {try? FileManager.default.removeItem(at: root)}
+        let launcher = root.appendingPathComponent("launcher")
+        let game = root.appendingPathComponent("game")
+        try FileManager.default.createDirectory(at: launcher, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: game.appendingPathComponent("logs"), withIntermediateDirectories: true)
+        let marker = "[12:00:01] LATEST-GAME-FAILURE\n"
+        let tail = Data(("\n" + marker).utf8)
+        var full = Data(repeating: 65, count: Diagnostics.limit - tail.count)
+        for index in stride(from: 79, to: full.count, by: 80) {full[index] = 10}
+        full.append(tail)
+        for url in [launcher.appendingPathComponent("launcher.log"), launcher.appendingPathComponent("launcher-previous.log"), game.appendingPathComponent("logs/latest.log"), game.appendingPathComponent("logs/previous.log")] {
+            try full.write(to: url)
+        }
+        let data = try Data(contentsOf: Diagnostics.export(folder: launcher, gameFolder: game))
+        XCTAssertLessThanOrEqual(data.count, 4 * Diagnostics.limit)
+        let text = String(decoding: data, as: UTF8.self)
+        let current = try XCTUnwrap(text.components(separatedBy: "--- Game current ---\n").last)
+        XCTAssertTrue(current.contains(marker), "Export must retain the newest error, not truncate it to fit headers")
+    }
+
     func testDiagnosticsAreBoundedRedactedAndExportOnlyLogs() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer {try? FileManager.default.removeItem(at:root)}
