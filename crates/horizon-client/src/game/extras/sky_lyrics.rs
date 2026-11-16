@@ -9,6 +9,7 @@ use super::super::lyricsplus;
 use horizon_client::hud::{HudAtlas, HudBatch, pictures::Picture, rgba};
 use horizon_client::hud_kit::fit::ellipsize;
 use lyricsplus_engine::lrc::Lyrics;
+use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 
 /// Words live this long in the world, in seconds.
@@ -38,6 +39,16 @@ pub(in crate::game) struct SkyLyrics {
     /// The cover, decoded on its own thread: (track serial, picture).
     cover: Arc<Mutex<Option<(u64, Arc<Picture>)>>>,
     cover_tried: u64,
+    /// Which parts show (the client menu's switches), read once from its settings.
+    pub(in crate::game) shows: Cell<Option<Shows>>,
+}
+
+/// The parts the client menu switches.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::game) struct Shows {
+    pub words: bool,
+    pub card: bool,
+    pub pill: bool,
 }
 
 /// Every word of `lyrics` with when it is sung, in song seconds, for lines `lines`.
@@ -54,7 +65,25 @@ fn words_in(
 }
 
 impl Game<'_> {
+    /// The sky lyrics' parts that show; all on until the client menu turns one off.
+    pub(in crate::game) fn sky_shows(&self) -> Shows {
+        if let Some(shows) = self.sky_lyrics.shows.get() {
+            return shows;
+        }
+        let read = |key| {
+            self.native_setting(super::client_menu::ID, key)
+                .is_none_or(|v| v.trim() != "false")
+        };
+        let shows = Shows {
+            words: read("lyric_words"),
+            card: read("song_card"),
+            pill: read("lyrics_pill"),
+        };
+        self.sky_lyrics.shows.set(Some(shows));
+        shows
+    }
     pub(in crate::game) fn draw_sky_lyrics(&mut self, batch: &mut HudBatch) {
+        let shows = self.sky_shows();
         let Some((snap, pos_ms)) = lyricsplus::now_playing(self) else {
             self.sky_lyrics.floating.clear();
             return;
@@ -93,7 +122,7 @@ impl Game<'_> {
             .filter(|(serial, _)| *serial == track.serial)
             .map(|(_, p)| p.clone());
         let atlas = &self.gui.atlas;
-        if !self.debug {
+        if shows.card && !self.debug {
             let progress =
                 (track.duration_ms > 0).then(|| snap.position_ms as f32 / track.duration_ms as f32);
             draw_card(
@@ -117,7 +146,7 @@ impl Game<'_> {
         let start = lyrics.lines[i].time_ms as f64 / 1000.0;
         let end = lyrics.end_of(i, track.duration_ms) as f64 / 1000.0;
         let alpha = ((t - start).min(end - t) / 0.3).clamp(0.0, 1.0) as f32;
-        if !line_words.is_empty() && alpha > 0.0 {
+        if shows.pill && !line_words.is_empty() && alpha > 0.0 {
             draw_pill(batch, atlas, &line_words, t, alpha);
         }
 
@@ -126,6 +155,10 @@ impl Game<'_> {
         if t < s.spawned_until - 0.5 || t > s.spawned_until + 2.0 {
             s.spawned_until = t;
             s.floating.clear();
+        }
+        if !shows.words {
+            s.floating.clear();
+            return;
         }
         let Some((camera, yaw, pitch, fov)) = self.locator_camera else {
             return;

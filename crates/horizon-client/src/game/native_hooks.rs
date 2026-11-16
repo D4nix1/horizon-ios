@@ -2007,6 +2007,8 @@ impl Game<'_> {
     pub(super) fn native_frame(&mut self, elapsed: Duration) {
         // LyricsPlus (modded-pc), as its mixin bundle hooks this HEAD.
         super::lyricsplus::frame(self);
+        // The client menu (modded-pc, Right Shift).
+        super::extras::client_menu::frame(self);
         mod_api::dispatch_frame(self, mod_api::mods(), elapsed);
     }
     /// Client-side evaluation of a mod's namespaced conditional item model property.
@@ -2556,6 +2558,8 @@ impl Game<'_> {
     pub(super) fn native_key(&mut self, key: &str, pressed: bool) {
         // LyricsPlus (modded-pc), as its mixin bundle hooks this HEAD.
         super::lyricsplus::key(self, key, pressed);
+        // The client menu (modded-pc, Right Shift).
+        super::extras::client_menu::key(self, key, pressed);
         mod_api::dispatch_key(self, mod_api::mods(), key, pressed);
     }
     /// A real window key event after handling, including repeats and consumed shortcuts.
@@ -3004,6 +3008,8 @@ impl Game<'_> {
     pub(super) fn native_mods(&mut self, mods: &mut Vec<NativeMod>) {
         // LyricsPlus (modded-pc), as its mixin bundle hooks this HEAD.
         super::lyricsplus::listed(mods);
+        // The client menu (modded-pc, Right Shift).
+        super::extras::client_menu::listed(mods);
         mod_api::dispatch_mods(self, mod_api::mods(), mods);
     }
     /// The buttons of mod `mod_id`'s settings page, under its keys: push
@@ -3588,6 +3594,8 @@ impl Game<'_> {
     ) {
         // LyricsPlus (modded-pc), as its mixin bundle hooks this HEAD.
         super::lyricsplus::screen_draw(self, batch, screen);
+        // The client menu (modded-pc, Right Shift).
+        super::extras::client_menu::draw(self, batch, screen);
         mod_api::dispatch_screen_render_post(self, mod_api::mods(), batch, screen);
     }
     /// A mouse button went down over the open screen
@@ -3620,6 +3628,8 @@ impl Game<'_> {
     ) {
         // LyricsPlus (modded-pc), as its mixin bundle hooks this HEAD.
         super::lyricsplus::screen_click(self, screen, button, canceled);
+        // The client menu (modded-pc, Right Shift).
+        super::extras::client_menu::click(self, screen, button, canceled);
         mod_api::dispatch_screen_mouse_button_pressed_pre(
             self,
             mod_api::mods(),

@@ -6,6 +6,7 @@
 //! Each Horizon extra's game glue is a child module here, so it leaves the engine in one move
 //! (docs/layers.md, plan M5): `reconnect` (auto-reconnect), `pvp` (the PvP & HUD options),
 //! `mouse_tweaks` and `sorting` (the inventory extras).
+pub(in crate::game) mod client_menu;
 pub(in crate::game) mod mouse_tweaks;
 pub(in crate::game) mod pvp;
 mod reconnect;
@@ -14,11 +15,14 @@ mod sorting;
 
 use super::{Dim, Game, Screen, native_hooks::NativeMinimap};
 use horizon_client::{
+    actions::Action,
     extras::{Corner, Cps, FpsCounter, fov_target},
-    extras_hud::{self, Corners},
+    extras_hud::{self, Corners, Keystrokes},
     hud::{HudBatch, MINIMAP_SPRITE},
+    keybinds,
     minimap::{self, Layer, Minimap, View},
     reconnect::Tracker,
+    sprint::Keys,
 };
 use std::time::Duration;
 use winit::event::MouseButton;
@@ -215,6 +219,43 @@ impl Game<'_> {
             };
             extras_hud::draw_minimap(batch, atlas, &mut corners, &look);
         }
+        // The client menu's FPS counter and keystrokes (Right Shift).
+        let e = &self.settings.extras;
+        let (fps_on, fps_corner, lows) = (e.fps, e.fps_corner, e.fps_lows);
+        let (keys_on, keys_corner, cps_on) = (e.keystrokes, e.keystrokes_corner, e.keystrokes_cps);
+        if fps_on && visible(fps_corner) {
+            let reading = self.extras.fps.reading();
+            extras_hud::draw_fps(
+                batch,
+                &self.gui.atlas,
+                &mut corners,
+                fps_corner,
+                reading,
+                lows,
+            );
+        }
+        if keys_on && visible(keys_corner) {
+            let now = self.extras_now();
+            let cps = cps_on.then(|| {
+                let [l, r] = &mut self.extras.cps;
+                (l.per_second(now), r.per_second(now))
+            });
+            let input = self.keystroke_inputs();
+            let label = |name| keybinds::display_name(self.settings.keys.get(name)).plain();
+            let k = Keystrokes {
+                moves: [
+                    (input.forward, label("key.forward")),
+                    (input.left, label("key.left")),
+                    (input.backward, label("key.back")),
+                    (input.right, label("key.right")),
+                ],
+                jump: input.jump,
+                attack: self.extras.mouse[0],
+                use_: self.extras.mouse[1],
+                cps,
+            };
+            extras_hud::draw_keystrokes(batch, &self.gui.atlas, &mut corners, keys_corner, &k);
+        }
         self.draw_pvp_hud(batch, &mut corners);
         self.draw_sky_lyrics(batch);
         self.native_hud(batch, &mut corners);
@@ -224,6 +265,19 @@ impl Game<'_> {
             let shown = Corner::ALL.map(|corner| self.native_corner_shown(corner));
             extras_hud::draw_layers(layers, batch, &self.gui.atlas, &mut corners, shown);
         }
+    }
+    /// The movement keys the keystrokes overlay shows, by mapping, with the stick as player
+    /// input reads it.
+    fn keystroke_inputs(&self) -> Keys {
+        Keys {
+            forward: self.keys.held(Action::Forward),
+            backward: self.keys.held(Action::Back),
+            left: self.keys.held(Action::Left),
+            right: self.keys.held(Action::Right),
+            jump: self.keys.held(Action::Jump),
+            ..Keys::default()
+        }
+        .with_stick(self.pad_move())
     }
     /// The height the status effect icons take at the top right
     /// (`Hud.extractEffects`: beneficial at y 1, harmful at y 26).

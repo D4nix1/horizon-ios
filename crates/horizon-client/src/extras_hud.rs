@@ -260,7 +260,6 @@ mod tests {
     }
 }
 
-#[cfg(target_os = "ios")]
+// The FPS counter and keystrokes: iOS's, drawn on PC too by the modded client.
 mod native_ios;
-#[cfg(target_os = "ios")]
 pub use native_ios::{Keystrokes, draw_fps, draw_keystrokes, fps_text, keystrokes_size};
