@@ -47,10 +47,13 @@ pub(in crate::game) enum Tile {
     OwnNameTag,
     BlockParticles,
     ChatAnimation,
+    JumpCircles,
+    Trail,
+    WorldTint,
 }
 
 impl Tile {
-    const ALL: [Tile; 12] = [
+    const ALL: [Tile; 15] = [
         Tile::Fps,
         Tile::Keystrokes,
         Tile::Cps,
@@ -63,8 +66,20 @@ impl Tile {
         Tile::OwnNameTag,
         Tile::BlockParticles,
         Tile::ChatAnimation,
+        Tile::JumpCircles,
+        Tile::Trail,
+        Tile::WorldTint,
     ];
-    fn label(self) -> String {
+    /// The name on the tile; World Tint names its colour too.
+    fn label(self, g: &Game<'_>) -> String {
+        if self == Tile::WorldTint {
+            let (key, plain, _) = super::visuals::TINTS[g.visual_shows().tint_mode];
+            return format!(
+                "{} · {}",
+                lang::get_or("horizon.client.tint", "Tint"),
+                lang::get_or(key, plain)
+            );
+        }
         let (key, plain) = match self {
             Tile::Fps => ("horizon.client.fps", "FPS"),
             Tile::Keystrokes => ("horizon.client.keystrokes", "Keystrokes"),
@@ -78,6 +93,9 @@ impl Tile {
             Tile::OwnNameTag => ("horizon.client.own_name_tag", "Own Nametag"),
             Tile::BlockParticles => ("horizon.client.block_particles", "Hide Particles"),
             Tile::ChatAnimation => ("horizon.client.chat_animation", "Chat Animation"),
+            Tile::JumpCircles => ("horizon.client.jump_circles", "Jump Circles"),
+            Tile::Trail => ("horizon.client.trail", "Trail"),
+            Tile::WorldTint => ("horizon.client.tint", "Tint"),
         };
         lang::get_or(key, plain)
     }
@@ -96,9 +114,44 @@ impl Tile {
             Tile::OwnNameTag => e.own_name_tag,
             Tile::BlockParticles => e.hide_block_particles,
             Tile::ChatAnimation => e.chat_animation,
+            Tile::JumpCircles => g.visual_shows().circles,
+            Tile::Trail => g.visual_shows().trail,
+            Tile::WorldTint => g.visual_shows().tint,
         }
     }
-    fn toggle(self, g: &mut Game<'_>) {
+    /// A click: the left button switches the tile; the right one cycles World Tint's colour.
+    fn press(self, g: &mut Game<'_>, button: i32) {
+        if matches!(self, Tile::JumpCircles | Tile::Trail | Tile::WorldTint) {
+            let mut shows = g.visual_shows();
+            let set = |g: &Game<'_>, key: &str, on: bool| {
+                g.native_set_setting(ID, key, if on { "true" } else { "false" })
+            };
+            match (self, button) {
+                (Tile::WorldTint, 1) => {
+                    shows.tint_mode = (shows.tint_mode + 1) % super::visuals::TINTS.len();
+                    shows.tint = true;
+                    g.native_set_setting(ID, "tint_mode", &shows.tint_mode.to_string());
+                    set(g, "world_tint", true);
+                }
+                (Tile::WorldTint, _) => {
+                    shows.tint = !shows.tint;
+                    set(g, "world_tint", shows.tint);
+                }
+                (Tile::JumpCircles, _) => {
+                    shows.circles = !shows.circles;
+                    set(g, "jump_circles", shows.circles);
+                }
+                _ => {
+                    shows.trail = !shows.trail;
+                    set(g, "trail", shows.trail);
+                }
+            }
+            g.visuals.shows.set(Some(shows));
+            return;
+        }
+        if button != 0 {
+            return;
+        }
         let e = &mut g.settings.extras;
         let flag = match self {
             Tile::Fps => &mut e.fps,
@@ -110,6 +163,7 @@ impl Tile {
             Tile::OwnNameTag => &mut e.own_name_tag,
             Tile::BlockParticles => &mut e.hide_block_particles,
             Tile::ChatAnimation => &mut e.chat_animation,
+            Tile::JumpCircles | Tile::Trail | Tile::WorldTint => return,
             Tile::LyricWords | Tile::SongCard | Tile::LyricsPill => {
                 let mut shows = g.sky_shows();
                 let (name, flag) = match self {
@@ -129,7 +183,7 @@ impl Tile {
 }
 
 /// Clicks wait here for the frame: the screen hooks only read the game.
-static PENDING: Mutex<Vec<Tile>> = Mutex::new(Vec::new());
+static PENDING: Mutex<Vec<(Tile, i32)>> = Mutex::new(Vec::new());
 /// The tiles as last drawn, for clicks to hit.
 static DRAWN: Mutex<Vec<(Tile, [f32; 4])>> = Mutex::new(Vec::new());
 
@@ -200,8 +254,8 @@ pub(in crate::game) fn key(g: &mut Game<'_>, key: &str, pressed: bool) {
 
 pub(in crate::game) fn frame(g: &mut Game<'_>) {
     let clicks = std::mem::take(&mut *PENDING.lock().unwrap_or_else(|p| p.into_inner()));
-    for tile in clicks {
-        tile.toggle(g);
+    for (tile, button) in clicks {
+        tile.press(g, button);
     }
 }
 
@@ -215,7 +269,7 @@ pub(in crate::game) fn click(
         return;
     }
     *canceled = true;
-    if button != 0 {
+    if button > 1 {
         return;
     }
     let drawn = DRAWN.lock().unwrap_or_else(|p| p.into_inner());
@@ -223,7 +277,7 @@ pub(in crate::game) fn click(
         PENDING
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .push(*tile);
+            .push((*tile, button));
     }
 }
 
@@ -245,8 +299,19 @@ pub(in crate::game) fn draw(g: &Game<'_>, b: &mut HudBatch, screen: &NativeScree
         .clone_from(&tiles);
     for (tile, rect) in tiles {
         // A click not applied yet shows already.
-        let on = tile.get(g) ^ (pending.iter().filter(|t| **t == tile).count() % 2 == 1);
-        draw_tile(atlas, b, tile, rect, on, inside(rect, screen.mouse));
+        let flips = pending
+            .iter()
+            .filter(|(t, b)| *t == tile && *b == 0)
+            .count();
+        let on = tile.get(g) ^ (flips % 2 == 1);
+        draw_tile(
+            atlas,
+            b,
+            &tile.label(g),
+            rect,
+            on,
+            inside(rect, screen.mouse),
+        );
     }
 }
 
@@ -269,7 +334,7 @@ fn header(atlas: &HudAtlas, b: &mut HudBatch, [px, py, pw]: [f32; 3]) {
 fn draw_tile(
     atlas: &HudAtlas,
     b: &mut HudBatch,
-    tile: Tile,
+    label: &str,
     [x, y, w, h]: [f32; 4],
     on: bool,
     hover: bool,
@@ -284,8 +349,7 @@ fn draw_tile(
         // A thin accent along the top marks what is on.
         b.fill_rounded(atlas, [x + 10.0, y, w - 20.0, 2.0], 1.0, ON);
     }
-    let label = tile.label();
-    let tw = HudBatch::text_width(atlas, &label);
+    let tw = HudBatch::text_width(atlas, label);
     let ink = if on { u32::MAX } else { MUTED };
     b.text(
         atlas,

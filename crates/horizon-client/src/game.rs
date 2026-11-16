@@ -2697,6 +2697,7 @@ struct Game<'a> {
     /// The camera the last frame drew from (position, yaw, pitch, fov), for the locator bar.
     locator_camera: Option<([f64; 3], f32, f32, f32)>,
     sky_lyrics: extras::sky_lyrics::SkyLyrics,
+    visuals: extras::visuals::Visuals,
     native_camera_frame: Option<horizon_client::mod_api::NativeCamera>,
     native_tasks: native_tasks::NativeTasks,
     /// The yaw and pitch a native mod's camera drew the last frame from (`native_camera_pose`),
@@ -5934,6 +5935,8 @@ impl Game<'_> {
         self.input_hud_begin();
         let mut batch = HudBatch::new(size);
         batch.glint_colour = self.pvp_glint_texel();
+        // The client menu's world tint (modded-pc), under every HUD layer.
+        self.draw_world_tint(&mut batch);
         // GlobalSettingsUniform's GameTime, for a resource pack's text shader.
         batch.game_time = ((self.world.game_time.rem_euclid(24000)) as f32
             + self.clock.fraction() as f32)
@@ -11879,6 +11882,7 @@ impl<'a> Game<'a> {
             waypoints: Default::default(),
             locator_camera: None,
             sky_lyrics: Default::default(),
+            visuals: Default::default(),
             native_camera_frame: None,
             native_tasks: native_tasks::NativeTasks::new(),
             posed_rotation: None,

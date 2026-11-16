@@ -420,6 +420,8 @@ impl Game<'_> {
             self.text_display_vertices += batch.vertices.len() / 6 * 4;
         }
         self.text_displays = displays;
+        // The client menu's jump circles and trail (modded-pc), in the text displays' pass.
+        self.visuals_world(camera, normal);
     }
 }
 

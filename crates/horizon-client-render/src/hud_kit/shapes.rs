@@ -80,7 +80,7 @@ pub(crate) fn mix_colour(a: u32, b: u32, t: f32) -> u32 {
 }
 
 /// The UV of the atlas's white texel, which every flat shape samples.
-fn white(atlas: &HudAtlas) -> [f32; 2] {
+pub fn white(atlas: &HudAtlas) -> [f32; 2] {
     let w = atlas.white;
     [(w.u0 + w.u1) / 2.0, (w.v0 + w.v1) / 2.0]
 }

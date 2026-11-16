@@ -12,6 +12,7 @@ pub(in crate::game) mod pvp;
 mod reconnect;
 pub(in crate::game) mod sky_lyrics;
 mod sorting;
+pub(in crate::game) mod visuals;
 
 use super::{Dim, Game, Screen, native_hooks::NativeMinimap};
 use horizon_client::{
@@ -80,6 +81,7 @@ impl Game<'_> {
         self.recipe_lookups_now();
         self.native_frame(elapsed);
         self.pvp_frame();
+        self.visuals_frame();
         self.recipes_received_now();
     }
     /// The frame counter for mods: fps, min, 1% low.
