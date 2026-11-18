@@ -617,8 +617,8 @@ mod tests {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Physical {
     Key(u16, bool),
-    CustomKey(u16,bool),
-    CustomMouse(u8,bool),
+    CustomKey(u16, bool),
+    CustomMouse(u8, bool),
     Mouse(u8, bool),
     Scroll(f64, f64),
     Keyboard,
@@ -633,7 +633,12 @@ pub struct Recognized {
     pub point: (f64, f64),
 }
 impl Recognized {
-    pub fn inputs(self, grabbed: bool, mouse_gestures: bool) -> Vec<(f64, Physical)> {
+    pub fn inputs(
+        self,
+        grabbed: bool,
+        mouse_gestures: bool,
+        attack_targeted: bool,
+    ) -> Vec<(f64, Physical)> {
         let slot = (0..9).contains(&self.slot);
         match self.kind {
             0 => vec![(0.0, Physical::Cancel)],
@@ -659,7 +664,9 @@ impl Recognized {
                         (0.0, Physical::Key(key, false)),
                     ]
                 } else if mouse_gestures {
-                    let button = u8::from(grabbed);
+                    // In a world, attack an entity under the crosshair; otherwise use/place.
+                    // Menus always receive the primary (left) click.
+                    let button = u8::from(grabbed && !attack_targeted);
                     vec![
                         (0.0, Physical::Mouse(button, true)),
                         (0.033, Physical::Mouse(button, false)),
@@ -698,5 +705,55 @@ impl Recognized {
             5 if self.phase == 1 => vec![(0.0, Physical::Keyboard)],
             _ => vec![],
         }
+    }
+}
+
+#[cfg(test)]
+mod recognized_input_tests {
+    use super::*;
+
+    #[test]
+    fn world_taps_attack_entities_and_use_blocks_but_menus_left_click() {
+        let tap = Recognized {
+            kind: 1,
+            phase: 3,
+            slot: -1,
+            point: (120.0, 80.0),
+        };
+        assert_eq!(
+            tap.inputs(true, true, true),
+            vec![
+                (0.0, Physical::Mouse(0, true)),
+                (0.033, Physical::Mouse(0, false))
+            ]
+        );
+        assert_eq!(
+            tap.inputs(true, true, false),
+            vec![
+                (0.0, Physical::Mouse(1, true)),
+                (0.033, Physical::Mouse(1, false))
+            ]
+        );
+        assert_eq!(
+            tap.inputs(false, true, false),
+            vec![
+                (0.0, Physical::Mouse(0, true)),
+                (0.033, Physical::Mouse(0, false))
+            ]
+        );
+    }
+
+    #[test]
+    fn cancelled_long_press_releases_attack_button() {
+        let cancelled = Recognized {
+            kind: 2,
+            phase: 5,
+            slot: -1,
+            point: (120.0, 80.0),
+        };
+        assert_eq!(
+            cancelled.inputs(true, true, false),
+            vec![(0.0, Physical::Mouse(0, false))]
+        );
     }
 }

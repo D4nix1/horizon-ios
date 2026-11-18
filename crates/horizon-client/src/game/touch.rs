@@ -40,6 +40,8 @@ pub(super) struct TouchInput {
     hardware: super::input_mode::InputMode,
     /// The finger that is the pointer over a menu.
     menu: Option<MenuFinger>,
+    /// Menu finger owning an immediate left-button drag.
+    menu_drag: Option<u64>,
     /// Clicks to release once a tick has passed: vanilla samples buttons once a tick, so a tap released in
     /// the same frame would be lost (the pad holds its short presses back the same way).
     late: Vec<(MouseButton, u64)>,
@@ -1296,6 +1298,7 @@ impl Game<'_> {
     }
     fn touch_cursor_reset(&mut self) {
         self.touch.cursor.cancel();
+        self.touch.menu_drag = None;
         self.touch.cursor_pending.clear();
         self.touch.cursor_screen = None;
         self.touch.cursor_drawn = None;
@@ -1360,7 +1363,8 @@ impl Game<'_> {
         }
         let surface = self.touch.cursor.primary_finger() == Some(id);
         let layout = self.visible_touch_layout(size.0, size.1);
-        let phase = match phase {
+        let touch_phase = phase;
+        let phase = match touch_phase {
             TouchPhase::Started => 0,
             TouchPhase::Moved => 1,
             TouchPhase::Ended => 2,
@@ -1416,6 +1420,18 @@ impl Game<'_> {
             }
         }
         self.touch_record_click_context();
+        // Menus press immediately, move while held, and release on lift: this is required for inventory/crafting drag-and-drop.
+        match touch_phase {
+            TouchPhase::Started if self.touch.cursor.primary_finger() == Some(id) => {
+                self.touch.menu_drag = Some(id);
+                self.touch_queue_cursor_button(MouseButton::Left, true);
+            }
+            TouchPhase::Ended | TouchPhase::Cancelled if self.touch.menu_drag == Some(id) => {
+                self.touch.menu_drag = None;
+                self.touch_queue_cursor_button(MouseButton::Left, false);
+            }
+            _ => {}
+        }
     }
     fn touch_menu_mouse_held(&self, button: MouseButton) -> bool {
         let (index, control) = match button {
@@ -1425,6 +1441,7 @@ impl Game<'_> {
             _ => return false,
         };
         (index < 2 && self.touch.cursor.held(index == 1))
+            || (button == MouseButton::Left && self.touch.menu_drag.is_some())
             || self.touch.cursor_keys.contains(&control)
             || self.touch.native_mouse[index]
             || self.touch.custom_mouse[index]
@@ -1649,6 +1666,7 @@ impl Game<'_> {
         ] {
             let held = self.touch.fingers.held(control)
                 || (index < 2 && self.touch.cursor.held(index == 1))
+                || (button == MouseButton::Left && self.touch.menu_drag.is_some())
                 || self.touch.cursor_keys.contains(&control)
                 || self.touch.cursor_down[index]
                 || self.touch.native_mouse.get(index).copied().unwrap_or(false)
@@ -1911,9 +1929,11 @@ impl Game<'_> {
                 slot: event.slot,
                 point: event.point,
             };
-            for (delay, input) in
-                recognized.inputs(self.touch_playing(), no_world || touch::mouse_gestures())
-            {
+            for (delay, input) in recognized.inputs(
+                self.touch_playing(),
+                no_world || touch::mouse_gestures(),
+                self.touch_playing() && self.entity_targeted(),
+            ) {
                 if delay == 0.0 {
                     let old_modifiers = self.modifiers;
                     let old_context = self.touch.cursor_delivery.clone();

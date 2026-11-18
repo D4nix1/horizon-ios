@@ -69,7 +69,8 @@ fn default_layout(w: f32, h: f32) -> Vec<(Control, Rect)> {
     let gap = 2.0 * unit;
     let top = 40.0 * unit;
     let top_gap = 8.0 * unit;
-    let top_x = (w - (3.0 * top + 2.0 * top_gap)) / 2.0;
+    // Bedrock order: third person, pause, chat, emotes/more, debug/logs.
+    let top_x = (w - (5.0 * top + 4.0 * top_gap)) / 2.0;
     let d = button_size(h);
     let (cx, cy) = (MARGIN + d, h - MARGIN - 2.0 * d - 16.0);
     let mut v = vec![
@@ -93,39 +94,27 @@ fn default_layout(w: f32, h: f32) -> Vec<(Control, Rect)> {
                 s,
             ],
         ),
+        (Control::Perspective, [top_x, 0.0, top, top]),
+        (Control::Pause, [top_x + top + top_gap, 0.0, top, top]),
         (
-            Control::Perspective,
-            [98.0 * unit, 0.0, 96.0 * unit, 40.0 * unit],
-        ),
-        (Control::Chat, [0.0, 42.0 * unit, 96.0 * unit, 40.0 * unit]),
-        (
-            Control::Pause,
-            [w - 3.0 * 106.8 * unit, 0.0, 104.8 * unit, 39.2 * unit],
+            Control::Chat,
+            [top_x + 2.0 * (top + top_gap), 0.0, top, top],
         ),
         (
-            Control::Inventory,
-            [
-                w - 3.0 * 106.8 * unit - 102.0 * unit,
-                0.0,
-                100.0 * unit,
-                40.0 * unit,
-            ],
+            Control::More,
+            [top_x + 3.0 * (top + top_gap), 0.0, top, top],
+        ),
+        (
+            Control::Debug,
+            [top_x + 4.0 * (top + top_gap), 0.0, top, top],
         ),
     ];
     v.extend([
-        (Control::More, [0.0, 0.0, 96.0 * unit, 40.0 * unit]),
-        (
-            Control::Debug,
-            [294.0 * unit, 0.0, 96.0 * unit, 40.0 * unit],
-        ),
         (
             Control::PlayerList,
-            [196.0 * unit, 0.0, 96.0 * unit, 40.0 * unit],
+            [top_x + 5.0 * (top + top_gap), 0.0, top, top],
         ),
-        (
-            Control::Hide,
-            [w - 69.6 * unit, 0.0, 69.6 * unit, 40.0 * unit],
-        ),
+        (Control::Hide, [w - 14.0 - top, 0.0, top, top]),
     ]);
     v.extend([
         (Control::Forward, [cx, cy - d, d, d]),
@@ -135,6 +124,7 @@ fn default_layout(w: f32, h: f32) -> Vec<(Control, Rect)> {
     ]);
     // Gui.extractItemHotbar's slots: the bar is 182 wide, centred, 22 high at the bottom.
     let (hx, hy) = ((w / 2.0 - 91.0).floor(), h - 22.0);
+    v.push((Control::Inventory, [hx + 182.0, hy, 20.0, 22.0]));
     for slot in 0..9u8 {
         v.push((
             Control::Hotbar(slot),

@@ -64,7 +64,7 @@ enum TouchButton: Int, CaseIterable, Codable, Identifiable {
         let unit = min(w,h) / 768, s = 69.6 * unit, stick = 204.8 * unit
         let right = 0.94878495 * w - s, gap = 2 * unit
         let top = 40 * unit, topGap = 8 * unit
-        let topX = (w - (3 * top + 2 * topGap)) / 2
+        let topX = (w - (5 * top + 4 * topGap)) / 2
         switch self {
         case .forward: return CGRect(x:cx,y:cy-d,width:d,height:d)
         case .back: return CGRect(x:cx,y:cy+d,width:d,height:d)
@@ -78,13 +78,13 @@ enum TouchButton: Int, CaseIterable, Codable, Identifiable {
         case .middleClick: return CGRect(x:0.83548373*w-s,y:0.67798775*h-s,width:s,height:s)
         case .joystick: return CGRect(x:0.02326631*w,y:min(0.9753418*h-stick,h > w ? h-34-stick : h),width:stick,height:stick)
         case .perspective: return CGRect(x:topX,y:0,width:top,height:top)
-        case .chat: return CGRect(x:topX+top+topGap,y:0,width:top,height:top)
-        case .pause: return CGRect(x:topX+2*(top+topGap),y:0,width:top,height:top)
-        case .inventory: return CGRect(x:w-14-top,y:0,width:top,height:top)
-        case .more: return CGRect(x:14,y:0,width:top,height:top)
-        case .debug: return CGRect(x:topX-top-topGap,y:0,width:top,height:top)
-        case .playerList: return CGRect(x:topX+3*(top+topGap),y:0,width:top,height:top)
-        case .hide: return CGRect(x:w-14-2*top-topGap,y:0,width:top,height:top)
+        case .pause: return CGRect(x:topX+top+topGap,y:0,width:top,height:top)
+        case .chat: return CGRect(x:topX+2*(top+topGap),y:0,width:top,height:top)
+        case .more: return CGRect(x:topX+3*(top+topGap),y:0,width:top,height:top)
+        case .debug: return CGRect(x:topX+4*(top+topGap),y:0,width:top,height:top)
+        case .inventory: return CGRect(x:w/2+91,y:h-22,width:20,height:22)
+        case .playerList: return CGRect(x:topX+5*(top+topGap),y:0,width:top,height:top)
+        case .hide: return CGRect(x:w-14-top,y:0,width:top,height:top)
         case .runtime: return CGRect(x:w-176.4*unit,y:0,width:104.8*unit,height:39.2*unit)
         }
     }
@@ -658,7 +658,7 @@ final class TouchGestureBridge: NSObject, UIGestureRecognizerDelegate {
         let visible = configuration.buttons.filter { button in
             if noWorld { return false }
             if controlsHidden { return button == .hide }
-            return moreOpen || ![TouchButton.perspective, .chat, .debug, .playerList].contains(button)
+            return moreOpen || button != .playerList
         }
         if visible.contains(where: { configuration.rect($0, in: gui).contains(p) }) { return false }
         let auxiliarySize = (min(48, max(26, gui.height * 0.14)) * 0.75).rounded()
@@ -687,7 +687,7 @@ final class TouchGestureBridge: NSObject, UIGestureRecognizerDelegate {
         }
     }
     @objc private func tapped(_ sender: TouchSurfaceTap) {
-        guard sender.state == .recognized, sender.clickEligible, !suppressTap else { return }
+        guard playing, sender.state == .recognized, sender.clickEligible, !suppressTap else { return }
         emit(1, phase: sender.state.rawValue, location: point(sender.location(in: surface)), slot: hotbarSlot,
              modifiers: sender.modifierFlags, touch: sender.touchIdentity)
     }
@@ -697,7 +697,7 @@ final class TouchGestureBridge: NSObject, UIGestureRecognizerDelegate {
         if current >= 0 && current == hotbarSlot { emit(3, phase: sender.state.rawValue, slot: current, modifiers: sender.modifierFlags) }
     }
     @objc private func held(_ sender: UILongPressGestureRecognizer) {
-        guard let surface else { return }
+        guard playing, let surface else { return }
         if sender.state == .began { suppressTap = true }
         emit(2, phase: sender.state.rawValue, slot: slot(sender.location(in: surface)), modifiers: sender.modifierFlags)
     }
