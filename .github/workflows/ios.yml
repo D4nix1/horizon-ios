@@ -37,7 +37,7 @@ jobs:
     # MAC_RUNNER remains available for a maintainer-provided runner with Xcode 26 or newer.
     # Standard Intel PR runners avoid the ARM hosted-pool capacity queue.
     # Both Rust and Xcode still explicitly target ARM64 iOS below.
-    runs-on: ${{ github.event_name == 'pull_request' && 'macos-26-intel' || vars.MAC_RUNNER || 'macos-26' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'macos-26-intel' || vars.MAC_RUNNER || 'macos-26-intel' }}
     timeout-minutes: 90
     defaults:
       run:
