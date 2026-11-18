@@ -41,6 +41,7 @@ pub(super) struct TouchInput {
     /// The finger that is the pointer over a menu.
     menu: Option<MenuFinger>,
     /// Menu finger owning an immediate left-button drag.
+    #[cfg(target_os = "ios")]
     menu_drag: Option<u64>,
     /// Clicks to release once a tick has passed: vanilla samples buttons once a tick, so a tap released in
     /// the same frame would be lost (the pad holds its short presses back the same way).
@@ -2027,7 +2028,13 @@ fn draw_bedrock_button(
     let side = rect[2].min(rect[3]).max(1.0);
     let x = rect[0] + (rect[2] - side) / 2.0;
     let y = rect[1] + (rect[3] - side) / 2.0;
-    let (outer, face, inset) = if held {
+    let (outer, face, inset) = if control == Control::Inventory {
+        (
+            rgba(65, 65, 65, 225),
+            rgba(130, 130, 130, 220),
+            rgba(175, 175, 175, 130),
+        )
+    } else if held {
         (
             rgba(55, 55, 55, 205),
             rgba(105, 105, 105, 145),
@@ -2114,7 +2121,7 @@ fn touch_glyph(control: Control) -> [&'static str; 7] {
             "....##.", "...###.", "..####.", ".##.##.", "...##..", "..##...", ".##....",
         ],
         Control::Perspective => [
-            ".......", ".#####.", "##...##", "#.#.#.#", "#.....#", ".#####.", ".......",
+            "..###..", ".#...#.", "#.#.#.#", "#.....#", "#..#..#", ".#...#.", "..###..",
         ],
         Control::Chat => [
             ".......", ".#####.", "#.....#", "#.....#", ".#####.", "...##...", "..##....",
@@ -2123,10 +2130,10 @@ fn touch_glyph(control: Control) -> [&'static str; 7] {
             "##...##", "##...##", "##...##", "##...##", "##...##", "##...##", "##...##",
         ],
         Control::Inventory => [
-            ".#####.", "#######", "#.....#", "#..#..#", "#.....#", "#######", ".......",
+            ".......", ".......", ".#.#.#.", ".......", ".......", ".......", ".......",
         ],
         Control::More => [
-            ".......", ".......", "##.##.##", ".......", ".......", ".......", ".......",
+            "..###..", ".#...#.", "#.#.#.#", "#.....#", "#.###.#", ".#...#.", "..###..",
         ],
         Control::Hide => [
             ".......", "..###..", ".#...#.", "#..#..#", ".#...#.", "..###..", ".......",
@@ -2135,7 +2142,7 @@ fn touch_glyph(control: Control) -> [&'static str; 7] {
             "#######", ".......", "#######", ".......", "#######", ".......", ".......",
         ],
         Control::Debug => [
-            ".#####.", "#.....#", "#.#.#.#", "#.....#", "#..#..#", ".#####.", ".......",
+            "...##..", "..#..#.", ".#....#", "#.....#", "#.....#", ".#....#", "..#..#.",
         ],
         Control::PlayerList => [
             ".##.##.", ".##.##.", ".......", "#######", "#..#..#", "#..#..#", ".......",
