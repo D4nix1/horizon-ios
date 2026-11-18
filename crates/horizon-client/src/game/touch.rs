@@ -1490,7 +1490,7 @@ impl Game<'_> {
         if let Some(touch::desktop::Action::Move(x, y)) = self.touch.cursor.tick(now) {
             self.touch_cursor_motion(event_loop, (x, y));
         }
-        let had_pending=!self.touch.cursor_pending.is_empty();
+        let had_pending = !self.touch.cursor_pending.is_empty();
         while let Some(edge) = self.touch.cursor_pending.first() {
             if edge.due > self.frames {
                 break;
@@ -1555,7 +1555,8 @@ impl Game<'_> {
                 break;
             }
         }
-        if had_pending && self.touch.cursor_pending.is_empty()
+        if had_pending
+            && self.touch.cursor_pending.is_empty()
             && !self.hardware_hides_touch()
             && let Some(at) = self.touch.cursor.position
         {
@@ -1954,14 +1955,7 @@ impl Game<'_> {
                 if self.touch.hidden {
                     matches!(c, Control::Hide | Control::Hotbar(_))
                 } else {
-                    self.touch.more
-                        || !matches!(
-                            c,
-                            Control::Perspective
-                                | Control::Chat
-                                | Control::Debug
-                                | Control::PlayerList
-                        )
+                    self.touch.more || !matches!(c, Control::Debug | Control::PlayerList)
                 }
             })
             .collect()
@@ -1993,33 +1987,150 @@ fn draw_amethyst_control(
             rgba(0, 0, 0, 255),
         );
     } else {
-        let label = match c {
-            Control::More => "More",
-            Control::Hide => "Hide\nGUI",
-            Control::Runtime => "Runtime\nMenu",
-            Control::Debug => "Debug\nMenu",
-            Control::PlayerList => "Player\nList",
-            Control::Jump => "Jump",
-            Control::Sneak => "Shift",
-            Control::Sprint => "Sprint",
-            Control::LeftClick => "Left\nClick",
-            Control::RightClick => "Right\nClick",
-            Control::MiddleClick => "Middle\nClick",
-            Control::Perspective => "Third\nperson",
-            Control::Chat => "Chat",
-            Control::Pause => "Pause",
-            Control::Inventory => "Inventory",
-            Control::Forward => "W",
-            Control::Back => "S",
-            Control::Left => "A",
-            Control::Right => "D",
-            _ => "",
-        };
-        horizon_client::ui_theme::touch_control(atlas, batch, r, label, held);
+        draw_bedrock_button(batch, atlas, c, r, held);
     }
     for v in &mut batch.vertices[start..] {
         v.color =
             (v.color & 0x00ffffff) | ((((v.color >> 24) as f32 * touch::opacity(c)) as u32) << 24);
+    }
+}
+
+/// Pocket/Bedrock-inspired square glass button with a tiny pixel glyph.
+/// This is original geometry; it does not copy Minecraft's proprietary art.
+fn draw_bedrock_button(
+    batch: &mut HudBatch,
+    atlas: &horizon_client::hud::HudAtlas,
+    control: Control,
+    rect: touch::Rect,
+    held: bool,
+) {
+    let side = rect[2].min(rect[3]).max(1.0);
+    let x = rect[0] + (rect[2] - side) / 2.0;
+    let y = rect[1] + (rect[3] - side) / 2.0;
+    let (outer, face, inset) = if held {
+        (
+            rgba(55, 55, 55, 205),
+            rgba(105, 105, 105, 145),
+            rgba(35, 35, 35, 115),
+        )
+    } else {
+        (
+            rgba(75, 75, 75, 185),
+            rgba(185, 185, 185, 95),
+            rgba(225, 225, 225, 55),
+        )
+    };
+    // Offset shadow, stepped frame, translucent face and inner highlight.
+    batch.fill(atlas, x + 2.0, y + 2.0, side, side, rgba(0, 0, 0, 90));
+    batch.fill(atlas, x, y, side, side, outer);
+    let edge = (side / 13.0).clamp(1.0, 3.0);
+    batch.fill(
+        atlas,
+        x + edge,
+        y + edge,
+        side - 2.0 * edge,
+        side - 2.0 * edge,
+        face,
+    );
+    batch.fill(
+        atlas,
+        x + 2.0 * edge,
+        y + 2.0 * edge,
+        side - 4.0 * edge,
+        side - 4.0 * edge,
+        inset,
+    );
+    batch.fill(
+        atlas,
+        x + edge,
+        y + edge,
+        side - 2.0 * edge,
+        edge,
+        rgba(255, 255, 255, if held { 35 } else { 95 }),
+    );
+
+    let glyph = touch_glyph(control);
+    let unit = (side * 0.72 / 7.0).max(1.0);
+    let gx = x + (side - unit * 7.0) / 2.0;
+    let gy = y + (side - unit * 7.0) / 2.0 + if held { 1.0 } else { 0.0 };
+    let ink = rgba(65, 65, 65, if held { 245 } else { 215 });
+    for (row, pattern) in glyph.iter().enumerate() {
+        for (col, pixel) in pattern.bytes().enumerate() {
+            if pixel == b'#' {
+                batch.fill(
+                    atlas,
+                    gx + col as f32 * unit,
+                    gy + row as f32 * unit,
+                    unit,
+                    unit,
+                    ink,
+                );
+            }
+        }
+    }
+}
+
+fn touch_glyph(control: Control) -> [&'static str; 7] {
+    match control {
+        Control::Forward => [
+            "...#...", "..###..", ".#####.", "...#...", "...#...", "...#...", "...#...",
+        ],
+        Control::Back => [
+            "...#...", "...#...", "...#...", "...#...", ".#####.", "..###..", "...#...",
+        ],
+        Control::Left => [
+            "...#...", "..##...", ".#####.", "####...", ".#####.", "..##...", "...#...",
+        ],
+        Control::Right => [
+            "...#...", "...##..", ".#####.", "...####", ".#####.", "...##..", "...#...",
+        ],
+        Control::Sneak => [
+            ".......", "..###..", ".#####.", "...##..", "..###..", ".##.##.", "##...##",
+        ],
+        Control::Jump => [
+            "...#...", "..###..", ".#####.", "...#...", "..###..", "..###..", ".......",
+        ],
+        Control::Sprint => [
+            "....##.", "...###.", "..####.", ".##.##.", "...##..", "..##...", ".##....",
+        ],
+        Control::Perspective => [
+            ".......", ".#####.", "##...##", "#.#.#.#", "#.....#", ".#####.", ".......",
+        ],
+        Control::Chat => [
+            ".......", ".#####.", "#.....#", "#.....#", ".#####.", "...##...", "..##....",
+        ],
+        Control::Pause => [
+            "##...##", "##...##", "##...##", "##...##", "##...##", "##...##", "##...##",
+        ],
+        Control::Inventory => [
+            ".#####.", "#######", "#.....#", "#..#..#", "#.....#", "#######", ".......",
+        ],
+        Control::More => [
+            ".......", ".......", "##.##.##", ".......", ".......", ".......", ".......",
+        ],
+        Control::Hide => [
+            ".......", "..###..", ".#...#.", "#..#..#", ".#...#.", "..###..", ".......",
+        ],
+        Control::Runtime => [
+            "#######", ".......", "#######", ".......", "#######", ".......", ".......",
+        ],
+        Control::Debug => [
+            ".#####.", "#.....#", "#.#.#.#", "#.....#", "#..#..#", ".#####.", ".......",
+        ],
+        Control::PlayerList => [
+            ".##.##.", ".##.##.", ".......", "#######", "#..#..#", "#..#..#", ".......",
+        ],
+        Control::LeftClick => [
+            "..###..", ".#####.", "##.##.#", "##.##.#", ".#####.", "..###..", ".......",
+        ],
+        Control::RightClick => [
+            "..###..", ".#####.", "#..##.#", "#..##.#", ".#####.", "..###..", ".......",
+        ],
+        Control::MiddleClick => [
+            "..###..", ".#####.", "##.#.##", "##.#.##", ".#####.", "..###..", ".......",
+        ],
+        Control::Hotbar(_) => ["......."; 7],
+        Control::Joystick => ["......."; 7],
     }
 }
 

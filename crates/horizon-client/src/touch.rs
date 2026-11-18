@@ -67,26 +67,31 @@ fn default_layout(w: f32, h: f32) -> Vec<(Control, Rect)> {
     let s = 69.6 * unit;
     let stick = 204.8 * unit;
     let gap = 2.0 * unit;
-    let right = 0.94878495 * w - s;
+    let top = 40.0 * unit;
+    let top_gap = 8.0 * unit;
+    let top_x = (w - (3.0 * top + 2.0 * top_gap)) / 2.0;
+    let d = button_size(h);
+    let (cx, cy) = (MARGIN + d, h - MARGIN - 2.0 * d - 16.0);
     let mut v = vec![
         (
             Control::Joystick,
             [0.02326631 * w, 0.9753418 * h - stick, stick, stick],
         ),
-        (Control::Sneak, [right, 0.31131014 * h, s, s]),
-        (Control::Jump, [right, 0.31131014 * h + s + gap, s, s]),
-        (Control::Sprint, [right - s - gap, 0.31131014 * h, s, s]),
+        // Bedrock-style action cluster: sneak occupies the D-pad centre,
+        // jump sits opposite the pad. World taps/holds handle use and mining.
+        (Control::Sneak, [cx, cy, d, d]),
         (
-            Control::LeftClick,
-            [0.7756397 * w - s, 0.8224885 * h - s, s, s],
+            Control::Jump,
+            [w - MARGIN - s, h - MARGIN - 2.0 * s - 16.0, s, s],
         ),
         (
-            Control::RightClick,
-            [0.8756154 * w - s, 0.8178498 * h - s, s, s],
-        ),
-        (
-            Control::MiddleClick,
-            [0.83548373 * w - s, 0.67798775 * h - s, s, s],
+            Control::Sprint,
+            [
+                w - MARGIN - 2.0 * s - gap,
+                h - MARGIN - 2.0 * s - 16.0,
+                s,
+                s,
+            ],
         ),
         (
             Control::Perspective,
@@ -122,8 +127,6 @@ fn default_layout(w: f32, h: f32) -> Vec<(Control, Rect)> {
             [w - 69.6 * unit, 0.0, 69.6 * unit, 40.0 * unit],
         ),
     ]);
-    let d = button_size(h);
-    let (cx, cy) = (MARGIN + d, h - MARGIN - 2.0 * d - 16.0);
     v.extend([
         (Control::Forward, [cx, cy - d, d, d]),
         (Control::Back, [cx, cy + d, d, d]),
@@ -633,6 +636,31 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn bedrock_default_uses_a_classic_dpad_and_surface_interaction() {
+        let l = layout(633.0, 292.0);
+        for control in [
+            Control::LeftClick,
+            Control::RightClick,
+            Control::MiddleClick,
+            Control::Joystick,
+        ] {
+            assert!(
+                !l.iter().any(|(c, _)| *c == control),
+                "unexpected default {control:?}"
+            );
+        }
+        let centre = at(&l, Control::Sneak);
+        let up = at(&l, Control::Forward);
+        let down = at(&l, Control::Back);
+        let left = at(&l, Control::Left);
+        let right = at(&l, Control::Right);
+        assert!((centre.0 - up.0).abs() < 0.01 && (centre.0 - down.0).abs() < 0.01);
+        assert!((centre.1 - left.1).abs() < 0.01 && (centre.1 - right.1).abs() < 0.01);
+        assert!((centre.1 - (up.1 + down.1) / 2.0).abs() < 0.01);
+        assert!((centre.0 - (left.0 + right.0) / 2.0).abs() < 0.01);
     }
 
     #[test]

@@ -63,26 +63,28 @@ enum TouchButton: Int, CaseIterable, Codable, Identifiable {
         let cx = 14 + d, cy = h - 14 - 2 * d - 16
         let unit = min(w,h) / 768, s = 69.6 * unit, stick = 204.8 * unit
         let right = 0.94878495 * w - s, gap = 2 * unit
+        let top = 40 * unit, topGap = 8 * unit
+        let topX = (w - (3 * top + 2 * topGap)) / 2
         switch self {
         case .forward: return CGRect(x:cx,y:cy-d,width:d,height:d)
         case .back: return CGRect(x:cx,y:cy+d,width:d,height:d)
         case .left: return CGRect(x:cx-d,y:cy,width:d,height:d)
         case .right: return CGRect(x:cx+d,y:cy,width:d,height:d)
-        case .sneak: return CGRect(x:right,y:0.31131014*h,width:s,height:s)
-        case .jump: return CGRect(x:right,y:0.31131014*h+s+gap,width:s,height:s)
-        case .sprint: return CGRect(x:right-s-gap,y:0.31131014*h,width:s,height:s)
+        case .sneak: return CGRect(x:cx,y:cy,width:d,height:d)
+        case .jump: return CGRect(x:w-14-s,y:h-14-2*s-16,width:s,height:s)
+        case .sprint: return CGRect(x:w-14-2*s-gap,y:h-14-2*s-16,width:s,height:s)
         case .leftClick: return CGRect(x:0.7756397*w-s,y:0.8224885*h-s,width:s,height:s)
         case .rightClick: return CGRect(x:0.8756154*w-s,y:0.8178498*h-s,width:s,height:s)
         case .middleClick: return CGRect(x:0.83548373*w-s,y:0.67798775*h-s,width:s,height:s)
         case .joystick: return CGRect(x:0.02326631*w,y:min(0.9753418*h-stick,h > w ? h-34-stick : h),width:stick,height:stick)
-        case .perspective: return CGRect(x:98*unit,y:h>w ? 42*unit : 0,width:96*unit,height:40*unit)
-        case .chat: return CGRect(x:0,y:42*unit,width:96*unit,height:40*unit)
-        case .pause: return CGRect(x:w-3*106.8*unit,y:0,width:104.8*unit,height:39.2*unit)
-        case .inventory: return CGRect(x:w-3*106.8*unit-102*unit,y:0,width:100*unit,height:40*unit)
-        case .more: return CGRect(x:0,y:0,width:96*unit,height:40*unit)
-        case .debug: return CGRect(x:294*unit,y:h>w ? 42*unit : 0,width:96*unit,height:40*unit)
-        case .playerList: return CGRect(x:196*unit,y:h>w ? 42*unit : 0,width:96*unit,height:40*unit)
-        case .hide: return CGRect(x:w-69.6*unit,y:0,width:69.6*unit,height:40*unit)
+        case .perspective: return CGRect(x:topX,y:0,width:top,height:top)
+        case .chat: return CGRect(x:topX+top+topGap,y:0,width:top,height:top)
+        case .pause: return CGRect(x:topX+2*(top+topGap),y:0,width:top,height:top)
+        case .inventory: return CGRect(x:w-14-top,y:0,width:top,height:top)
+        case .more: return CGRect(x:14,y:0,width:top,height:top)
+        case .debug: return CGRect(x:topX-top-topGap,y:0,width:top,height:top)
+        case .playerList: return CGRect(x:topX+3*(top+topGap),y:0,width:top,height:top)
+        case .hide: return CGRect(x:w-14-2*top-topGap,y:0,width:top,height:top)
         case .runtime: return CGRect(x:w-176.4*unit,y:0,width:104.8*unit,height:39.2*unit)
         }
     }
@@ -108,7 +110,7 @@ struct TouchConfiguration: Codable, Equatable {
     var forwardLock = false
     var showControls = true
     var virtualMouse = true
-    var joystick = true
+    var joystick = false
     var mouseGestures = true
     var hotbarGestures = true
     var slideableHotbar = false
@@ -137,6 +139,9 @@ struct TouchConfiguration: Codable, Equatable {
             if button == .runtime { return false }
             if button == .joystick { return joystick }
             if [.forward, .back, .left, .right].contains(button) { return !joystick }
+            // Tap = use/place; press-and-hold = attack/mine. The separate
+            // mouse buttons remain available as custom bindings, not defaults.
+            if [.leftClick, .rightClick, .middleClick].contains(button) { return false }
             return true
         }
     }

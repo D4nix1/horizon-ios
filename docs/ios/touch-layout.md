@@ -24,7 +24,11 @@ The Swift configuration uses `touchControls.v1` in this app's UserDefaults, sepa
 
 Validation covers production Rust layout and finger dispatch tests, isolated Swift persistence and ABI tests, iOS 18 phone and iPadOS 27 simulator editor interactions, an arm64 device framework build, and the iOS engine Clippy check. Simulator UI and compilation checks do not establish physical-device gameplay or recording behavior.
 
-## Cursor, mouse buttons and joystick
+'## Bedrock-style mobile preset
+
+The default iPhone layout uses the classic four-way D-pad at the lower left, with Sneak in its centre, Jump on the lower right, and Perspective, Chat and Pause in a compact top row. Controls use newly drawn square translucent frames and original pixel glyphs. The default overlay omits dedicated left/right/middle mouse buttons: a short world tap maps to Use (right mouse while the game is grabbed), while a press-and-hold maps to Attack/Break (left mouse) until release. The existing 400 ms hold duration remains adjustable, and explicit mouse buttons can still be added as custom controls.
+
+'## Cursor, mouse buttons and joystick
 
 App Settings → Touch controls offers **Mouse cursor** (default) or **Direct touch** for menus, and **D-pad** or **Joystick** for movement. In cursor mode, drag the empty menu surface to move a visible relative pointer. With **Tap and hold gestures** enabled (the default), a short tap left-clicks a menu, and a long press holds the left mouse button. Independent left/right mouse buttons hold until release, allowing one finger to move the pointer while another drags a slot or holds a mouse button. Quick clicks wait for the pointer’s rendered frame; screen transitions, cancellation, reloads and keyboard takeover discard stale presses. Direct touch retains absolute menu navigation.
 
