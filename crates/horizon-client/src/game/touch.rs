@@ -1010,6 +1010,14 @@ impl Game<'_> {
             return;
         }
         let atlas = &self.gui.atlas;
+        let underwater = self
+            .player
+            .as_ref()
+            .is_some_and(|player| player.is_under_water());
+        let passenger = self
+            .player
+            .as_ref()
+            .is_some_and(|player| player.is_passenger);
         for (control, r) in self.visible_touch_layout(batch.width, batch.height) {
             if matches!(control, Control::Hotbar(_)) {
                 continue;
@@ -1021,6 +1029,8 @@ impl Game<'_> {
                 r,
                 self.touch.fingers.held(control),
                 Some(self.touch.fingers.stick_point(r)),
+                underwater,
+                passenger,
             );
             if control == Control::Joystick
                 && touch::forward_lock()
@@ -1062,6 +1072,8 @@ impl Game<'_> {
                         r,
                         self.touch.cursor_keys.contains(&c),
                         Some(point),
+                        false,
+                        false,
                     );
                 }
             }
@@ -1989,6 +2001,8 @@ fn draw_amethyst_control(
     r: touch::Rect,
     held: bool,
     point: Option<(f32, f32)>,
+    underwater: bool,
+    passenger: bool,
 ) {
     let start = batch.vertices.len();
     if c == Control::Joystick {
@@ -2008,7 +2022,7 @@ fn draw_amethyst_control(
             rgba(0, 0, 0, 255),
         );
     } else {
-        draw_bedrock_button(batch, atlas, c, r, held);
+        draw_bedrock_button(batch, atlas, c, r, held, underwater, passenger);
     }
     for v in &mut batch.vertices[start..] {
         v.color =
@@ -2024,6 +2038,8 @@ fn draw_bedrock_button(
     control: Control,
     rect: touch::Rect,
     held: bool,
+    underwater: bool,
+    passenger: bool,
 ) {
     let side = rect[2].min(rect[3]).max(1.0);
     let x = rect[0] + (rect[2] - side) / 2.0;
@@ -2076,7 +2092,15 @@ fn draw_bedrock_button(
         rgba(255, 255, 255, if held { 35 } else { 95 }),
     );
 
-    let glyph = touch_glyph(control);
+    let glyph = if passenger && control == Control::Sneak {
+        touch_dismount_glyph()
+    } else if underwater && control == Control::Jump {
+        touch_water_ascend_glyph()
+    } else if underwater && control == Control::Sneak {
+        touch_water_descend_glyph()
+    } else {
+        touch_glyph(control)
+    };
     let unit = (side * 0.72 / 7.0).max(1.0);
     let gx = x + (side - unit * 7.0) / 2.0;
     let gy = y + (side - unit * 7.0) / 2.0 + if held { 1.0 } else { 0.0 };
@@ -2097,6 +2121,21 @@ fn draw_bedrock_button(
     }
 }
 
+fn touch_water_ascend_glyph() -> [&'static str; 7] {
+    [
+        ".......", "..#.#..", ".#...#.", "...#...", "..###..", ".#####.", ".......",
+    ]
+}
+fn touch_water_descend_glyph() -> [&'static str; 7] {
+    [
+        ".......", ".#####.", "..###..", "...#...", ".#...#.", "..#.#..", ".......",
+    ]
+}
+fn touch_dismount_glyph() -> [&'static str; 7] {
+    [
+        "....##.", "...#..#", "...#..#", "..#####", "...#.#.", "..##...", "..#....",
+    ]
+}
 fn touch_glyph(control: Control) -> [&'static str; 7] {
     match control {
         Control::Forward => [
